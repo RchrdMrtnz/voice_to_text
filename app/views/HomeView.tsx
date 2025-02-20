@@ -7,13 +7,13 @@ declare global {
     webkitSpeechRecognition: any;
   }
 }
-
 interface UploadedAudio {
   name: string;
-  status: "Pendiente" | "Procesando" | "Completado";
+  status: "Pendiente" | "Procesando" | "Completado" | "Error al procesar";
   transcriptLink?: string;
   audioLink?: string;
 }
+
 
 export default function MicrophoneComponent() {
   const [isRecording, setIsRecording] = useState(false);
@@ -194,15 +194,17 @@ export default function MicrophoneComponent() {
                 <li key={index} className="p-4 bg-gray-50 rounded-lg border flex flex-col sm:flex-row justify-between items-center">
                   <div className="flex items-center">
                     <span className="text-gray-700">{audio.name}</span>
-                    <span
-                      className={`ml-3 px-3 py-1 rounded-full text-sm font-medium ${
-                        audio.status === "Pendiente"
-                          ? "bg-gray-200 text-gray-700"
-                          : audio.status === "Procesando"
-                          ? "bg-yellow-200 text-yellow-800"
-                          : "bg-green-200 text-green-800"
-                      }`}
-                    >
+                      <span
+                        className={`ml-3 px-3 py-1 rounded-full text-sm font-medium ${
+                          audio.status === "Pendiente"
+                            ? "bg-gray-200 text-gray-700"
+                            : audio.status === "Procesando"
+                            ? "bg-yellow-200 text-yellow-800"
+                            : audio.status === "Completado"
+                            ? "bg-green-200 text-green-800"
+                            : "bg-red-200 text-red-800" // Manejo del estado "Error al procesar"
+                        }`}
+                      >
                       {audio.status}
                     </span>
                   </div>
