@@ -30,10 +30,10 @@ const auth = new google.auth.GoogleAuth({
 const drive = google.drive({ version: "v3", auth });
 
 // 📌 Crear directorio de uploads si no existe
-const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+const UPLOAD_DIR = "/tmp/uploads";
 if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR);
-  console.log(`✅ Carpeta creada: ${UPLOAD_DIR}`);
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  console.log(`✅ Carpeta creada en: ${UPLOAD_DIR}`);
 } else {
   console.log(`📂 Carpeta de uploads ya existe: ${UPLOAD_DIR}`);
 }
