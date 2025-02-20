@@ -185,10 +185,29 @@ export default function MicrophoneComponent() {
           {isRecording && <p className="text-red-500 mt-2">🔴 Grabando...</p>}
         </div>
 
+        {/* Subida de archivos */}
         <div className="mt-8 text-center">
           <p className="text-xl font-medium text-gray-700 mb-4">📂 Sube audios desde tu dispositivo</p>
-          <input type="file" multiple accept="audio/*" className="hidden" onChange={handleFileChange} />
+          
+          {/* Botón para abrir el selector de archivos */}
+          <button
+            onClick={() => document.getElementById("fileInput")?.click()}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg shadow-md hover:bg-blue-600 transition-all"
+          >
+            📤 Seleccionar Archivo
+          </button>
+
+          {/* Input oculto para seleccionar archivos */}
+          <input
+            id="fileInput"
+            type="file"
+            multiple
+            accept="audio/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
         </div>
+
 
         {processingMessage && (
           <div className="mt-6 p-3 bg-yellow-100 border border-yellow-300 rounded text-yellow-800 text-center">
