@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { OpenAI } from "openai";
 import { v4 as uuidv4 } from "uuid";
-import mime from "mime-types";
 
-// 📌 Verifica que las variables de entorno están disponibles
+// 📌 Verifica variables de entorno
 console.log("🔍 Variables de entorno:");
 console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? "✅ Definida" : "❌ No definida");
 console.log("GOOGLE_CLIENT_EMAIL:", process.env.GOOGLE_CLIENT_EMAIL ? "✅ Definida" : "❌ No definida");
@@ -40,7 +39,7 @@ export async function POST(req: NextRequest) {
 
     const fileId = uuidv4();
     const ext = file.name ? `.${file.name.split(".").pop()}` : "";
-    
+
     // 📌 Verificamos si la extensión es compatible
     if (!ALLOWED_EXTENSIONS.includes(ext.toLowerCase())) {
       console.error("❌ Formato no compatible:", ext);
@@ -49,21 +48,22 @@ export async function POST(req: NextRequest) {
 
     console.log(`📂 Procesando archivo: ${file.name} (${file.type})`);
 
-    // 📌 Convertimos el archivo en un objeto `File`
+    // 📌 Convertimos el archivo en un `Buffer`
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // 📌 Convertimos el `Buffer` en un `File` válido para OpenAI
+    const fileBlob = new Blob([buffer], { type: file.type });
+    const fileToSend = new File([fileBlob], file.name, { type: file.type, lastModified: Date.now() });
 
     // 📌 Subir el audio directamente a Google Drive
     const audioDriveLink = await uploadToDrive(buffer, `audio-${fileId}${ext}`, file.type);
 
     console.log("📡 Enviando audio a OpenAI Whisper para transcripción...");
-    const fileBlob = new Blob([buffer], { type: file.type });
-    const fileToSend = new File([fileBlob], file.name, { type: file.type, lastModified: Date.now() });
-    
     const whisperResponse = await openai.audio.transcriptions.create({
       model: "whisper-1",
       file: fileToSend, // ✅ Ahora enviamos un `File` válido
     });
-    
+
     if (!whisperResponse.text) {
       console.error("❌ OpenAI Whisper no devolvió texto.");
       return NextResponse.json({ error: "No se pudo obtener la transcripción." }, { status: 500 });
