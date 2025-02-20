@@ -3,7 +3,7 @@ import { google } from "googleapis";
 import { OpenAI } from "openai";
 import { v4 as uuidv4 } from "uuid";
 
-// 📌 Verifica variables de entorno
+// 📌 Verificar variables de entorno
 console.log("🔍 Variables de entorno:");
 console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? "✅ Definida" : "❌ No definida");
 console.log("GOOGLE_CLIENT_EMAIL:", process.env.GOOGLE_CLIENT_EMAIL ? "✅ Definida" : "❌ No definida");
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     const fileId = uuidv4();
     const ext = file.name ? `.${file.name.split(".").pop()}` : "";
 
-    // 📌 Verificamos si la extensión es compatible
+    // 📌 Verificar si la extensión es compatible
     if (!ALLOWED_EXTENSIONS.includes(ext.toLowerCase())) {
       console.error("❌ Formato no compatible:", ext);
       return NextResponse.json({ error: "Formato de archivo no compatible" }, { status: 400 });
