@@ -137,9 +137,6 @@ npm run dev
 
 ---
 
-## 👩‍💻 **Desarrollado por**
-💡 **Oriana Mendez**  
-
 🚀 **¡Disfruta transcribiendo audios con inteligencia artificial!** 🎧✨
 
 ---
