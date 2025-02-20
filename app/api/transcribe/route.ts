@@ -6,6 +6,7 @@ import path from "path";
 import { exec } from "child_process";
 import util from "util";
 import { v4 as uuidv4 } from "uuid";
+import ffmpeg from "ffmpeg-static";  // 📌 Usamos ffmpeg-static para Vercel
 
 const execPromise = util.promisify(exec);
 
@@ -29,7 +30,7 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: "v3", auth });
 
-// 📌 Crear directorio de uploads si no existe
+// 📌 Usamos `/tmp/` porque Vercel no permite escribir en otro lado
 const UPLOAD_DIR = "/tmp/uploads";
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -57,20 +58,11 @@ export async function POST(req: NextRequest) {
       // 🔹 Generar un ID único
       const fileId = uuidv4();
 
-      // 🔹 Guardar el archivo original
+      // 🔹 Guardar el archivo original en `/tmp/`
       const originalPath = path.join(UPLOAD_DIR, `${fileId}${path.extname(file.name)}`);
       const buffer = Buffer.from(await file.arrayBuffer());
       fs.writeFileSync(originalPath, buffer);
       console.log(`✅ Archivo guardado en: ${originalPath}`);
-
-      // 🔹 Verificar si ffmpeg está disponible
-      try {
-        await execPromise("ffmpeg -version");
-        console.log("✅ ffmpeg está disponible.");
-      } catch (err) {
-        console.error("🚨 ffmpeg no está disponible en producción.", err);
-        throw new Error("ffmpeg no está instalado en el entorno de producción.");
-      }
 
       // 🔹 Convertir a formato compatible si es necesario
       const convertedPath = await ensureWavFormat(originalPath, fileId);
@@ -90,7 +82,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "No se pudo obtener la transcripción." }, { status: 500 });
       }
 
-      // 🔹 Guardar transcripción en .txt
+      // 🔹 Guardar transcripción en `/tmp/`
       const txtPath = path.join(UPLOAD_DIR, `transcripcion-${fileId}.txt`);
       fs.writeFileSync(txtPath, response.text);
       console.log(`✅ Transcripción guardada en: ${txtPath}`);
@@ -123,7 +115,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// 🔹 Convertir audio a WAV si es necesario
+// 🔹 Convertir audio a WAV si es necesario (Usando ffmpeg-static)
 async function ensureWavFormat(inputPath: string, fileId: string): Promise<string> {
   const ext = path.extname(inputPath).toLowerCase();
   if (ext === ".wav") return inputPath;
@@ -131,8 +123,12 @@ async function ensureWavFormat(inputPath: string, fileId: string): Promise<strin
   const outputPath = path.join(UPLOAD_DIR, `audio-${fileId}.wav`);
 
   try {
+    if (!ffmpeg) {
+      throw new Error("ffmpeg-static no se pudo cargar.");
+    }
+
     console.log(`🛠️ Convirtiendo ${inputPath} → ${outputPath}`);
-    await execPromise(`ffmpeg -y -i "${inputPath}" -acodec pcm_s16le -ar 16000 "${outputPath}"`);
+    await execPromise(`${ffmpeg} -y -i "${inputPath}" -acodec pcm_s16le -ar 16000 "${outputPath}"`);
     console.log(`✅ Conversión completada: ${outputPath}`);
     return outputPath;
   } catch (error) {
