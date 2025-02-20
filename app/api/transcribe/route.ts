@@ -24,9 +24,9 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const drive = google.drive({ version: "v3", auth });
-const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID!; // ID de la carpeta en Drive
+const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID!; // ID de la carpeta de Drive
 
-// 🔹 Directorio de subida
+// 🔹 Directorio de subida local
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -46,14 +46,15 @@ export async function POST(req: NextRequest) {
     for (const file of files) {
       console.log(`📂 Procesando archivo: ${file.name}`);
 
-      // Generar un ID único para cada archivo
+      // 🔹 Generar un ID único para el archivo
       const fileId = uuidv4();
-      const originalExtension = path.extname(file.name);
-      const originalPath = path.join(UPLOAD_DIR, `${fileId}${originalExtension}`);
+
+      // 🔹 Guardar el archivo original
+      const originalPath = path.join(UPLOAD_DIR, `${fileId}${path.extname(file.name)}`);
       const buffer = Buffer.from(await file.arrayBuffer());
       fs.writeFileSync(originalPath, buffer);
 
-      // 🔹 Convertir a formato compatible con Whisper si es necesario
+      // 🔹 Convertir a formato compatible si es necesario
       const convertedPath = await ensureWavFormat(originalPath, fileId);
 
       // 🔹 Subir el audio a Google Drive
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
       const response = await openai.audio.transcriptions.create({
         model: "whisper-1",
         file: fs.createReadStream(convertedPath),
-        timestamp_granularities: ["segment"],
+        timestamp_granularities: ["segment"], // Soporta timestamps
       });
 
       if (!response.text) {
@@ -73,7 +74,13 @@ export async function POST(req: NextRequest) {
 
       // 🔹 Guardar transcripción en .txt con el ID del audio
       const txtPath = path.join(UPLOAD_DIR, `transcripcion-${fileId}.txt`);
-      saveTranscriptionAsTxt(response.segments, response.text, txtPath);
+      
+      // Verificar si `segments` existe en la respuesta
+      if ("segments" in response && Array.isArray(response.segments)) {
+        saveTranscriptionAsTxt(response.segments, response.text, txtPath);
+      } else {
+        fs.writeFileSync(txtPath, response.text);
+      }
 
       // 🔹 Subir la transcripción a Google Drive
       const txtDriveLink = await uploadToDrive(txtPath, `transcripcion-${fileId}.txt`, "text/plain");
@@ -105,7 +112,9 @@ async function ensureWavFormat(inputPath: string, fileId: string): Promise<strin
 
   try {
     console.log(`🛠️ Convirtiendo ${inputPath} → ${outputPath}`);
+
     await execPromise(`ffmpeg -y -i "${inputPath}" -acodec pcm_s16le -ar 16000 "${outputPath}"`);
+
     console.log(`✅ Conversión completada: ${outputPath}`);
     return outputPath;
   } catch (error) {
@@ -114,7 +123,7 @@ async function ensureWavFormat(inputPath: string, fileId: string): Promise<strin
   }
 }
 
-// 🔹 Guardar transcripción como TXT con timestamps
+// 🔹 Guardar transcripción como TXT con timestamps si existen
 function saveTranscriptionAsTxt(segments: any[], text: string, filePath: string) {
   let transcriptText = "";
 
@@ -131,24 +140,19 @@ function saveTranscriptionAsTxt(segments: any[], text: string, filePath: string)
 
 // 🔹 Subir archivos a Google Drive
 async function uploadToDrive(filePath: string, fileName: string, mimeType: string) {
-  try {
-    const response = await drive.files.create({
-      requestBody: {
-        name: fileName,
-        mimeType,
-        parents: [DRIVE_FOLDER_ID],
-      },
-      media: {
-        mimeType,
-        body: fs.createReadStream(filePath),
-      },
-    });
+  const response = await drive.files.create({
+    requestBody: {
+      name: fileName,
+      mimeType,
+      parents: [DRIVE_FOLDER_ID],
+    },
+    media: {
+      mimeType,
+      body: fs.createReadStream(filePath),
+    },
+  });
 
-    return `https://drive.google.com/file/d/${response.data.id}/view`;
-  } catch (error) {
-    console.error("🚨 Error subiendo archivo a Google Drive:", error);
-    throw new Error("Error al subir archivo a Google Drive.");
-  }
+  return `https://drive.google.com/file/d/${response.data.id}/view`;
 }
 
 // 🔹 Formatear timestamps a HH:MM:SS

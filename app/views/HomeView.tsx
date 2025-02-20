@@ -124,8 +124,6 @@ export default function MicrophoneComponent() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full bg-gradient-to-b from-blue-100 to-white p-6">
       <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-2xl">
-        <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">🎙️ Graba o Sube tu Audio</h2>
-
         {/* Grabación de audio */}
         <div className="mt-6 text-center">
           <p className="text-lg font-medium text-gray-700 mb-4">🎤 Graba un audio</p>
