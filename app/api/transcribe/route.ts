@@ -7,14 +7,14 @@ import { v4 as uuidv4 } from "uuid";
 // 📌 Inicializar OpenAI y Google Auth
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
-const privateKey = process.env.GOOGLE_PRIVATE_KEY
-  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
-  : "";
-
+let privateKey = process.env.GOOGLE_PRIVATE_KEY;
 if (!privateKey) {
-  console.error("❌ GOOGLE_PRIVATE_KEY no está definida correctamente.");
-  throw new Error("GOOGLE_PRIVATE_KEY no configurada correctamente.");
+    console.error("❌ GOOGLE_PRIVATE_KEY no está definida correctamente.");
+    throw new Error("GOOGLE_PRIVATE_KEY no configurada correctamente.");
 }
+privateKey = privateKey.replace(/\\n/g, "\n");
+
+console.log("🔑 Clave privada cargada correctamente:", privateKey.startsWith("-----BEGIN PRIVATE KEY-----"));
 
 console.log("GOOGLE_DRIVE_FOLDER_ID:", process.env.GOOGLE_DRIVE_FOLDER_ID);
 console.log("GOOGLE_CLIENT_EMAIL:", process.env.GOOGLE_CLIENT_EMAIL);

@@ -96,7 +96,10 @@ export default function MicrophoneComponent() {
     setProcessingMessage("⏳ Procesando audio...");
   
     const formData = new FormData();
-    formData.append("file", audioBlob);
+  
+    // ✅ Convertir `Blob` en `File` antes de enviarlo para preservar la extensión
+    const file = new File([audioBlob], fileName, { type: "audio/wav" });
+    formData.append("file", file);
   
     try {
       const response = await fetch("/api/transcribe", {
@@ -105,9 +108,9 @@ export default function MicrophoneComponent() {
       });
   
       const data = await response.json();
-      console.log("API Response:", data); // Debugging
+      console.log("API Response:", data);
   
-      if (!data.results || data.results.length === 0) {
+      if (!data.text) {
         console.error("Error: La API no devolvió resultados válidos");
         setUploadedAudios((prev) =>
           prev.map((audio) =>
@@ -123,8 +126,8 @@ export default function MicrophoneComponent() {
             ? {
                 ...audio,
                 status: "Completado",
-                transcriptLink: data.results[0]?.txtDriveLink || "",
-                audioLink: data.results[0]?.audioDriveLink || "",
+                transcriptLink: data.txtDriveLink || "",
+                audioLink: data.audioDriveLink || "",
               }
             : audio
         )
