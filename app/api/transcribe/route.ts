@@ -145,7 +145,12 @@ async function ensureWavFormat(inputPath: string, fileId: string): Promise<strin
     return outputPath;
   } catch (error) {
     console.error("🚨 Error convirtiendo el archivo a WAV:", error);
-    throw new Error(`Error al convertir el audio a WAV: ${error.message}`);
+  
+    if (error instanceof Error) {
+      throw new Error(`Error al convertir el audio a WAV: ${error.message}`);
+    } else {
+      throw new Error("Error desconocido al convertir el audio a WAV.");
+    }
   }
 }
 
