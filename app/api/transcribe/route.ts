@@ -7,30 +7,45 @@ import { exec } from "child_process";
 import util from "util";
 import { v4 as uuidv4 } from "uuid";
 
-
 const execPromise = util.promisify(exec);
 
-// Configuración de APIs
+// 📌 Verifica que las variables de entorno están disponibles
+console.log("🔍 Variables de entorno:");
+console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? "✅ Definida" : "❌ No definida");
+console.log("GOOGLE_CLIENT_EMAIL:", process.env.GOOGLE_CLIENT_EMAIL ? "✅ Definida" : "❌ No definida");
+console.log("GOOGLE_PRIVATE_KEY:", process.env.GOOGLE_PRIVATE_KEY ? "✅ Definida" : "❌ No definida");
+console.log("DRIVE_FOLDER_ID:", process.env.DRIVE_FOLDER_ID ? "✅ Definida" : "❌ No definida");
+
+// 📌 Inicializar OpenAI y Google Auth
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_CLIENT_EMAIL!,
-    private_key: process.env.GOOGLE_PRIVATE_KEY!.replace(/\\n/g, "\n"),
+    private_key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
   },
   scopes: ["https://www.googleapis.com/auth/drive.file"],
 });
 
 const drive = google.drive({ version: "v3", auth });
+
+// 📌 Crear directorio de uploads si no existe
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR);
+  console.log(`✅ Carpeta creada: ${UPLOAD_DIR}`);
+} else {
+  console.log(`📂 Carpeta de uploads ya existe: ${UPLOAD_DIR}`);
+}
 
 export async function POST(req: NextRequest) {
   try {
+    console.log("📥 Recibiendo archivo en API...");
     const formData = await req.formData();
     const files = formData.getAll("file") as File[];
 
     if (!files.length) {
+      console.log("❌ No se encontraron archivos en la solicitud.");
       return NextResponse.json({ error: "No se encontraron archivos" }, { status: 400 });
     }
 
@@ -39,13 +54,23 @@ export async function POST(req: NextRequest) {
     for (const file of files) {
       console.log(`📂 Procesando archivo: ${file.name}`);
 
-      // 🔹 Generar un ID único para el archivo
+      // 🔹 Generar un ID único
       const fileId = uuidv4();
 
       // 🔹 Guardar el archivo original
       const originalPath = path.join(UPLOAD_DIR, `${fileId}${path.extname(file.name)}`);
       const buffer = Buffer.from(await file.arrayBuffer());
       fs.writeFileSync(originalPath, buffer);
+      console.log(`✅ Archivo guardado en: ${originalPath}`);
+
+      // 🔹 Verificar si ffmpeg está disponible
+      try {
+        await execPromise("ffmpeg -version");
+        console.log("✅ ffmpeg está disponible.");
+      } catch (err) {
+        console.error("🚨 ffmpeg no está disponible en producción.", err);
+        throw new Error("ffmpeg no está instalado en el entorno de producción.");
+      }
 
       // 🔹 Convertir a formato compatible si es necesario
       const convertedPath = await ensureWavFormat(originalPath, fileId);
@@ -57,7 +82,7 @@ export async function POST(req: NextRequest) {
       const response = await openai.audio.transcriptions.create({
         model: "whisper-1",
         file: fs.createReadStream(convertedPath),
-        timestamp_granularities: ["segment"], // Soporta timestamps
+        timestamp_granularities: ["segment"],
       });
 
       if (!response.text) {
@@ -65,15 +90,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "No se pudo obtener la transcripción." }, { status: 500 });
       }
 
-      // 🔹 Guardar transcripción en .txt con el ID del audio
+      // 🔹 Guardar transcripción en .txt
       const txtPath = path.join(UPLOAD_DIR, `transcripcion-${fileId}.txt`);
-      
-      // Verificar si `segments` existe en la respuesta
-      if ("segments" in response && Array.isArray(response.segments)) {
-        saveTranscriptionAsTxt(response.segments, response.text, txtPath);
-      } else {
-        fs.writeFileSync(txtPath, response.text);
-      }
+      fs.writeFileSync(txtPath, response.text);
+      console.log(`✅ Transcripción guardada en: ${txtPath}`);
 
       // 🔹 Subir la transcripción a Google Drive
       const txtDriveLink = await uploadToDrive(txtPath, `transcripcion-${fileId}.txt`, "text/plain");
@@ -92,11 +112,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ results });
   } catch (error) {
     console.error("🚨 Error en la transcripción:", error);
-    return NextResponse.json({ error: "Error en la transcripción" }, { status: 500 });
+    return NextResponse.json({ error: "Error en la transcripción", details: error.message }, { status: 500 });
   }
 }
 
-// 🔹 Función para convertir cualquier audio a WAV con un ID único
+// 🔹 Convertir audio a WAV si es necesario
 async function ensureWavFormat(inputPath: string, fileId: string): Promise<string> {
   const ext = path.extname(inputPath).toLowerCase();
   if (ext === ".wav") return inputPath;
@@ -105,9 +125,7 @@ async function ensureWavFormat(inputPath: string, fileId: string): Promise<strin
 
   try {
     console.log(`🛠️ Convirtiendo ${inputPath} → ${outputPath}`);
-
     await execPromise(`ffmpeg -y -i "${inputPath}" -acodec pcm_s16le -ar 16000 "${outputPath}"`);
-
     console.log(`✅ Conversión completada: ${outputPath}`);
     return outputPath;
   } catch (error) {
@@ -116,28 +134,20 @@ async function ensureWavFormat(inputPath: string, fileId: string): Promise<strin
   }
 }
 
-// 🔹 Guardar transcripción como TXT con timestamps si existen
-function saveTranscriptionAsTxt(segments: any[], text: string, filePath: string) {
-  let transcriptText = "";
-
-  if (segments && Array.isArray(segments)) {
-    segments.forEach((segment) => {
-      transcriptText += `[${formatTimestamp(segment.start)} - ${formatTimestamp(segment.end)}] ${segment.text}\n`;
-    });
-  } else {
-    transcriptText = text;
-  }
-
-  fs.writeFileSync(filePath, transcriptText);
-}
-
 // 🔹 Subir archivos a Google Drive
 async function uploadToDrive(filePath: string, fileName: string, mimeType: string) {
+  console.log(`📤 Subiendo archivo a Google Drive: ${fileName}`);
+
+  if (!process.env.DRIVE_FOLDER_ID) {
+    console.error("❌ Error: DRIVE_FOLDER_ID no está definido.");
+    throw new Error("DRIVE_FOLDER_ID no está configurado.");
+  }
+
   const response = await drive.files.create({
     requestBody: {
       name: fileName,
       mimeType,
-      parents: [process.env.DRIVE_FOLDER_ID!],
+      parents: [process.env.DRIVE_FOLDER_ID],
     },
     media: {
       mimeType,
@@ -145,12 +155,6 @@ async function uploadToDrive(filePath: string, fileName: string, mimeType: strin
     },
   });
 
+  console.log(`✅ Archivo subido a Drive: ${response.data.id}`);
   return `https://drive.google.com/file/d/${response.data.id}/view`;
-}
-
-// 🔹 Formatear timestamps a HH:MM:SS
-function formatTimestamp(seconds: number): string {
-  const date = new Date(0);
-  date.setSeconds(seconds);
-  return date.toISOString().substr(11, 8);
 }
