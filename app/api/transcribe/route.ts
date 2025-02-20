@@ -51,17 +51,19 @@ export async function POST(req: NextRequest) {
 
     // 📌 Convertimos el archivo en un objeto `File`
     const buffer = Buffer.from(await file.arrayBuffer());
-    const fileObject = new File([buffer], file.name, { type: file.type, lastModified: Date.now() });
 
     // 📌 Subir el audio directamente a Google Drive
     const audioDriveLink = await uploadToDrive(buffer, `audio-${fileId}${ext}`, file.type);
 
     console.log("📡 Enviando audio a OpenAI Whisper para transcripción...");
+    const fileBlob = new Blob([buffer], { type: file.type });
+    const fileToSend = new File([fileBlob], file.name, { type: file.type, lastModified: Date.now() });
+    
     const whisperResponse = await openai.audio.transcriptions.create({
       model: "whisper-1",
-      file: fileObject, // ✅ Ahora enviamos un File en lugar de un Buffer
+      file: fileToSend, // ✅ Ahora enviamos un `File` válido
     });
-
+    
     if (!whisperResponse.text) {
       console.error("❌ OpenAI Whisper no devolvió texto.");
       return NextResponse.json({ error: "No se pudo obtener la transcripción." }, { status: 500 });
