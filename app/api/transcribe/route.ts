@@ -7,30 +7,23 @@ import { exec } from "child_process";
 import util from "util";
 import { v4 as uuidv4 } from "uuid";
 
+
 const execPromise = util.promisify(exec);
 
-// 🔹 Configuración de OpenAI Whisper
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-// 🔹 Configuración de Google Drive API
-const KEYFILE_PATH = path.join(process.cwd(), "credentials.json");
-const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
+// Configuración de APIs
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 const auth = new google.auth.GoogleAuth({
-  keyFile: KEYFILE_PATH,
-  scopes: SCOPES,
+  credentials: {
+    client_email: process.env.GOOGLE_CLIENT_EMAIL!,
+    private_key: process.env.GOOGLE_PRIVATE_KEY!.replace(/\\n/g, "\n"),
+  },
+  scopes: ["https://www.googleapis.com/auth/drive.file"],
 });
 
 const drive = google.drive({ version: "v3", auth });
-const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID!; // ID de la carpeta de Drive
-
-// 🔹 Directorio de subida local
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
 
 export async function POST(req: NextRequest) {
   try {
