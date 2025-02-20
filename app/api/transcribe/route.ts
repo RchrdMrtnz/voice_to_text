@@ -38,12 +38,12 @@ export async function POST(req: NextRequest) {
     }
 
     const fileId = uuidv4();
-    const ext = file.name ? `.${file.name.split(".").pop()}` : "";
+    const ext = file.name ? `.${file.name.split(".").pop()?.toLowerCase()}` : "";
 
     // 📌 Verificar si la extensión es compatible
-    if (!ALLOWED_EXTENSIONS.includes(ext.toLowerCase())) {
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
       console.error("❌ Formato no compatible:", ext);
-      return NextResponse.json({ error: "Formato de archivo no compatible" }, { status: 400 });
+      return NextResponse.json({ error: `Formato de archivo no compatible (${ext})` }, { status: 400 });
     }
 
     console.log(`📂 Procesando archivo: ${file.name} (${file.type})`);
@@ -56,12 +56,13 @@ export async function POST(req: NextRequest) {
     const fileToSend = new File([fileBlob], file.name, { type: file.type, lastModified: Date.now() });
 
     // 📌 Subir el audio directamente a Google Drive
+    console.log("📤 Subiendo audio a Google Drive...");
     const audioDriveLink = await uploadToDrive(buffer, `audio-${fileId}${ext}`, file.type);
 
     console.log("📡 Enviando audio a OpenAI Whisper para transcripción...");
     const whisperResponse = await openai.audio.transcriptions.create({
       model: "whisper-1",
-      file: fileToSend, // ✅ Ahora enviamos un `File` válido
+      file: fileToSend, // ✅ Enviamos un `File` válido
     });
 
     if (!whisperResponse.text) {
