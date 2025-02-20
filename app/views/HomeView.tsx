@@ -92,34 +92,55 @@ export default function MicrophoneComponent() {
         audio.name === fileName ? { ...audio, status: "Procesando" } : audio
       )
     );
-
+  
     setProcessingMessage("⏳ Procesando audio...");
-
+  
     const formData = new FormData();
     formData.append("file", audioBlob);
-
-    const response = await fetch("/api/transcribe", {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    setUploadedAudios((prev) =>
-      prev.map((audio) =>
-        audio.name === fileName
-          ? {
-              ...audio,
-              status: "Completado",
-              transcriptLink: data.results[0].txtDriveLink,
-              audioLink: data.results[0].audioDriveLink,
-            }
-          : audio
-      )
-    );
-
-    setProcessingMessage(null);
+  
+    try {
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+  
+      const data = await response.json();
+      console.log("API Response:", data); // Debugging
+  
+      if (!data.results || data.results.length === 0) {
+        console.error("Error: La API no devolvió resultados válidos");
+        setUploadedAudios((prev) =>
+          prev.map((audio) =>
+            audio.name === fileName ? { ...audio, status: "Error al procesar" } : audio
+          )
+        );
+        return;
+      }
+  
+      setUploadedAudios((prev) =>
+        prev.map((audio) =>
+          audio.name === fileName
+            ? {
+                ...audio,
+                status: "Completado",
+                transcriptLink: data.results[0]?.txtDriveLink || "",
+                audioLink: data.results[0]?.audioDriveLink || "",
+              }
+            : audio
+        )
+      );
+    } catch (error) {
+      console.error("Error al subir audio:", error);
+      setUploadedAudios((prev) =>
+        prev.map((audio) =>
+          audio.name === fileName ? { ...audio, status: "Error al procesar" } : audio
+        )
+      );
+    } finally {
+      setProcessingMessage(null);
+    }
   };
+  
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full bg-gradient-to-b from-blue-100 to-white p-6">

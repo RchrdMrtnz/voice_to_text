@@ -137,7 +137,7 @@ async function uploadToDrive(filePath: string, fileName: string, mimeType: strin
     requestBody: {
       name: fileName,
       mimeType,
-      parents: [DRIVE_FOLDER_ID],
+      parents: [process.env.DRIVE_FOLDER_ID!],
     },
     media: {
       mimeType,
