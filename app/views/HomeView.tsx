@@ -97,7 +97,6 @@ export default function MicrophoneComponent() {
   
     const formData = new FormData();
   
-    // ✅ Convertir `Blob` en `File` antes de enviarlo para preservar la extensión
     const file = new File([audioBlob], fileName, { type: "audio/wav" });
     formData.append("file", file);
   
