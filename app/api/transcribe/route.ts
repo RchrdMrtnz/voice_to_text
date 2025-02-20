@@ -14,10 +14,20 @@ console.log("DRIVE_FOLDER_ID:", process.env.DRIVE_FOLDER_ID ? "✅ Definida" : "
 // 📌 Inicializar OpenAI y Google Auth
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
+const privateKey = process.env.GOOGLE_PRIVATE_KEY
+  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
+  : "";
+
+if (!privateKey) {
+  console.error("❌ GOOGLE_PRIVATE_KEY no está definida correctamente.");
+  throw new Error("GOOGLE_PRIVATE_KEY no configurada correctamente.");
+}
+
+
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_CLIENT_EMAIL!,
-    private_key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+    private_key: privateKey,
   },
   scopes: ["https://www.googleapis.com/auth/drive.file"],
 });
@@ -26,6 +36,8 @@ const drive = google.drive({ version: "v3", auth });
 
 // 📌 Extensiones de audio permitidas
 const ALLOWED_EXTENSIONS = [".mp3", ".wav", ".m4a", ".ogg", ".flac"];
+
+
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,13 +50,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No se encontró archivo" }, { status: 400 });
     }
 
+    
+
     // 📌 Obtener extensión del archivo
-    const ext = file.name ? `.${file.name.split(".").pop()?.toLowerCase()}` : "";
+    const ext = file.name ? `.${file.name.split(".").pop()?.toLowerCase()}` : `.${file.type.split("/").pop()?.toLowerCase()}`;
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
       console.error("❌ Formato de archivo no compatible:", ext);
       return NextResponse.json({ error: `Formato de archivo no compatible (${ext})` }, { status: 400 });
     }
-
+    console.log("📂 Nombre del archivo recibido:", file.name);
+    console.log("📂 Tipo de archivo recibido:", file.type);
+        
     console.log(`📂 Procesando archivo: ${file.name} (${file.type})`);
 
     // 📌 Convertimos el archivo en `Buffer`
