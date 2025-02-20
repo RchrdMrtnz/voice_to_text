@@ -144,10 +144,10 @@ export default function MicrophoneComponent() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full bg-gradient-to-b from-blue-100 to-white p-6">
-      <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-2xl">
+      <div className="bg-white px-8 py-12 rounded-lg shadow-lg w-full max-w-2xl">
         {/* Grabación de audio */}
-        <div className="mt-6 text-center">
-          <p className="text-lg font-medium text-gray-700 mb-4">🎤 Graba un audio</p>
+        <div className="text-center">
+          <p className="text-xl font-medium text-gray-700 mb-4">🎤 Graba un audio</p>
           <div className="flex justify-center">
             {isRecording ? (
               <button
@@ -170,7 +170,7 @@ export default function MicrophoneComponent() {
 
         {/* Subida de archivos */}
         <div className="mt-8 text-center">
-          <p className="text-lg font-medium text-gray-700 mb-4">📂 Sube audios desde tu dispositivo</p>
+          <p className="text-xl font-medium text-gray-700 mb-4">📂 Sube audios desde tu dispositivo</p>
           <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-all p-4">
             <span className="text-4xl">📤</span>
             <span className="text-gray-700 text-sm mt-2">Haz clic aquí o arrastra tus archivos</span>

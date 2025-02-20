@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
 }
 
 // 🔹 Convertir audio a WAV si es necesario (Usando ffmpeg-static)
+
 async function ensureWavFormat(inputPath: string, fileId: string): Promise<string> {
   const ext = path.extname(inputPath).toLowerCase();
   if (ext === ".wav") return inputPath;
@@ -127,15 +128,25 @@ async function ensureWavFormat(inputPath: string, fileId: string): Promise<strin
       throw new Error("ffmpeg-static no se pudo cargar.");
     }
 
+    // 📌 Verificar si ffmpeg soporta el formato
+    const ffmpegVersion = await execPromise(`"${ffmpeg}" -version`);
+    console.log("🔍 Versión de ffmpeg:", ffmpegVersion.stdout);
+
     console.log(`🛠️ Convirtiendo ${inputPath} → ${outputPath}`);
-    await execPromise(`${ffmpeg} -y -i "${inputPath}" -acodec pcm_s16le -ar 16000 "${outputPath}"`);
+
+    const ffmpegCommand = `"${ffmpeg}" -y -i "${inputPath.replace(/\\/g, "/")}" -acodec pcm_s16le -ar 16000 "${outputPath.replace(/\\/g, "/")}"`;
+
+    console.log("🔹 Ejecutando:", ffmpegCommand);
+    await execPromise(ffmpegCommand);
+
     console.log(`✅ Conversión completada: ${outputPath}`);
     return outputPath;
   } catch (error) {
     console.error("🚨 Error convirtiendo el archivo a WAV:", error);
-    throw new Error("Error al convertir el audio a WAV.");
+    throw new Error("Error al convertir el audio a WAV. Verifica si el formato del archivo es compatible.");
   }
 }
+
 
 // 🔹 Subir archivos a Google Drive
 async function uploadToDrive(filePath: string, fileName: string, mimeType: string) {
