@@ -112,7 +112,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ results });
   } catch (error) {
     console.error("🚨 Error en la transcripción:", error);
-    return NextResponse.json({ error: "Error en la transcripción", details: error.message }, { status: 500 });
+
+    return NextResponse.json(
+      { 
+        error: "Error en la transcripción", 
+        details: error instanceof Error ? error.message : "Error desconocido" 
+      },
+      { status: 500 }
+    );
   }
 }
 
