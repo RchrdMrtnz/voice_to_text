@@ -3,12 +3,7 @@ import { google } from "googleapis";
 import { OpenAI } from "openai";
 import fs from "fs";
 import path from "path";
-import { exec } from "child_process";
-import util from "util";
 import { v4 as uuidv4 } from "uuid";
-import ffmpeg from "ffmpeg-static";  // 📌 Usamos ffmpeg-static para Vercel
-
-const execPromise = util.promisify(exec);
 
 // 📌 Verifica que las variables de entorno están disponibles
 console.log("🔍 Variables de entorno:");
@@ -64,16 +59,13 @@ export async function POST(req: NextRequest) {
       fs.writeFileSync(originalPath, buffer);
       console.log(`✅ Archivo guardado en: ${originalPath}`);
 
-      // 🔹 Convertir a formato compatible si es necesario
-      const convertedPath = await ensureWavFormat(originalPath, fileId);
-
       // 🔹 Subir el audio a Google Drive
-      const audioDriveLink = await uploadToDrive(convertedPath, `audio-${fileId}.wav`, "audio/wav");
+      const audioDriveLink = await uploadToDrive(originalPath, `audio-${fileId}${path.extname(file.name)}`, file.type);
 
       console.log("📡 Enviando audio a OpenAI Whisper para transcripción...");
       const response = await openai.audio.transcriptions.create({
         model: "whisper-1",
-        file: fs.createReadStream(convertedPath),
+        file: fs.createReadStream(originalPath),
         timestamp_granularities: ["segment"],
       });
 
@@ -112,45 +104,6 @@ export async function POST(req: NextRequest) {
       },
       { status: 500 }
     );
-  }
-}
-
-// 🔹 Convertir audio a WAV si es necesario (Usando ffmpeg-static)
-
-async function ensureWavFormat(inputPath: string, fileId: string): Promise<string> {
-  const ext = path.extname(inputPath).toLowerCase();
-  console.log(`🔍 Formato del archivo: ${ext}`);
-
-  if (ext === ".wav") return inputPath;
-
-  const outputPath = path.join(UPLOAD_DIR, `audio-${fileId}.wav`);
-
-  try {
-    if (!ffmpeg) {
-      throw new Error("ffmpeg-static no se pudo cargar.");
-    }
-
-    // Verificar versión de ffmpeg
-    const ffmpegVersion = await execPromise(`"${ffmpeg}" -version`);
-    console.log("🔍 Versión de ffmpeg:", ffmpegVersion.stdout);
-
-    console.log(`🛠️ Convirtiendo ${inputPath} → ${outputPath}`);
-
-    const ffmpegCommand = `"${ffmpeg}" -y -i "${inputPath.replace(/\\/g, "/")}" -acodec pcm_s16le -ar 16000 "${outputPath.replace(/\\/g, "/")}"`;
-    console.log("🔹 Ejecutando:", ffmpegCommand);
-
-    await execPromise(ffmpegCommand);
-    console.log(`✅ Conversión completada: ${outputPath}`);
-
-    return outputPath;
-  } catch (error) {
-    console.error("🚨 Error convirtiendo el archivo a WAV:", error);
-  
-    if (error instanceof Error) {
-      throw new Error(`Error al convertir el audio a WAV: ${error.message}`);
-    } else {
-      throw new Error("Error desconocido al convertir el audio a WAV.");
-    }
   }
 }
 
