@@ -1,4 +1,4 @@
-Aquí tienes un **README** completo y bien estructurado para tu proyecto de transcripción de audios con **Next.js, Whisper y Google Drive**.
+Aquí tienes el **README** actualizado con la información sobre el archivo `credentials.json` que configuramos para la integración con **Google Drive API**. 📄🚀
 
 ---
 
@@ -40,19 +40,52 @@ npm install
 ```
 
 ### **3️⃣ Configurar Variables de Entorno**
-Crea un archivo **`.env.local`** en la raíz del proyecto y añade lo siguiente:
+Crea un archivo **`.env`** en la raíz del proyecto y añade lo siguiente:
 
 ```env
 OPENAI_API_KEY=tu_api_key_de_openai
-GOOGLE_CLIENT_EMAIL=tu_google_client_email
-GOOGLE_PRIVATE_KEY="tu_google_private_key"
 GOOGLE_DRIVE_FOLDER_ID=tu_folder_id_en_drive
 ```
 🔹 **`OPENAI_API_KEY`** → Obtén una clave en [OpenAI](https://platform.openai.com/).  
-🔹 **`GOOGLE_CLIENT_EMAIL` y `GOOGLE_PRIVATE_KEY`** → Configura Google Drive API.  
-🔹 **`GOOGLE_DRIVE_FOLDER_ID`** → Crea una carpeta en Drive y copia su ID.  
+🔹 **`GOOGLE_DRIVE_FOLDER_ID`** → Crea una carpeta en Google Drive y copia su ID.  
 
-### **4️⃣ Instalar y Configurar FFmpeg**
+---
+
+### **4️⃣ Configurar Credenciales de Google Drive**
+Para permitir que la aplicación suba archivos a Google Drive, necesitas configurar una **Cuenta de Servicio** en Google Cloud.
+
+#### **🔹 Paso 1: Crear Credenciales en Google Cloud**
+1. **Accede a la Consola de Google Cloud**:  
+   👉 [Google Cloud Console](https://console.cloud.google.com/)
+2. Crea un nuevo proyecto.
+3. Habilita la **Google Drive API** en el proyecto.
+4. Ve a **Credenciales** > **Crear Credenciales** > **Cuenta de Servicio**.
+5. Asigna el rol **Editor** o **Propietario**.
+6. Descarga el archivo **JSON** de las credenciales.
+
+#### **🔹 Paso 2: Guardar el archivo `credentials.json`**
+Guarda el archivo JSON en la raíz del proyecto con el nombre **`credentials.json`**.
+
+Ejemplo de cómo debería verse tu archivo:
+
+```json
+{
+  "type": "service_account",
+  "project_id": "tu-proyecto-id",
+  "private_key_id": "tu-clave-privada-id",
+  "private_key": "-----BEGIN PRIVATE KEY-----\ntu-clave-aqui\n-----END PRIVATE KEY-----\n",
+  "client_email": "tu-email@tu-proyecto.iam.gserviceaccount.com",
+  "client_id": "tu-client-id",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/tu-email@tu-proyecto.iam.gserviceaccount.com"
+}
+```
+
+---
+
+### **5️⃣ Instalar y Configurar FFmpeg**
 #### **Windows**
 Descargar desde: [FFmpeg Oficial](https://ffmpeg.org/download.html)  
 Asegurar que está en **PATH** con:
@@ -91,7 +124,9 @@ npm run dev
 🔹 **Solución:** FFmpeg no reconoce el formato del archivo. Asegúrate de que está instalado y configurado correctamente.  
 
 ### ❌ **Error: "Permission denied" con Google Drive**
-🔹 **Solución:** Revisa los permisos del **Google Service Account** y asegúrate de que puede escribir en la carpeta especificada en `GOOGLE_DRIVE_FOLDER_ID`.  
+🔹 **Solución:**  
+1. Comparte la carpeta de Google Drive con el correo de la **Cuenta de Servicio**.  
+2. Asegúrate de que el `credentials.json` está bien configurado.  
 
 ---
 
