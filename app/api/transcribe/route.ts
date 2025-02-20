@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { OpenAI } from "openai";
+import { Readable } from "stream";
 import { v4 as uuidv4 } from "uuid";
 
-// 📌 Verificar variables de entorno
+// 📌 Variables de entorno
 console.log("🔍 Variables de entorno:");
 console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? "✅ Definida" : "❌ No definida");
 console.log("GOOGLE_CLIENT_EMAIL:", process.env.GOOGLE_CLIENT_EMAIL ? "✅ Definida" : "❌ No definida");
@@ -23,46 +24,50 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: "v3", auth });
 
-// 📌 Extensiones de audio compatibles con Whisper
+// 📌 Extensiones de audio permitidas
 const ALLOWED_EXTENSIONS = [".mp3", ".wav", ".m4a", ".ogg", ".flac"];
 
 export async function POST(req: NextRequest) {
   try {
-    console.log("📥 Recibiendo archivo en API...");
+    console.log("📥 Recibiendo archivo...");
     const formData = await req.formData();
     const file = formData.get("file") as File;
 
     if (!file) {
-      console.log("❌ No se encontró archivo en la solicitud.");
+      console.error("❌ No se encontró archivo.");
       return NextResponse.json({ error: "No se encontró archivo" }, { status: 400 });
     }
 
-    const fileId = uuidv4();
+    // 📌 Obtener extensión del archivo
     const ext = file.name ? `.${file.name.split(".").pop()?.toLowerCase()}` : "";
-
-    // 📌 Verificar si la extensión es compatible
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      console.error("❌ Formato no compatible:", ext);
+      console.error("❌ Formato de archivo no compatible:", ext);
       return NextResponse.json({ error: `Formato de archivo no compatible (${ext})` }, { status: 400 });
     }
 
     console.log(`📂 Procesando archivo: ${file.name} (${file.type})`);
 
-    // 📌 Convertimos el archivo en un `Buffer`
+    // 📌 Convertimos el archivo en `Buffer`
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 📌 Convertimos el `Buffer` en un `File` válido para OpenAI
+    // 📌 Convertimos `Buffer` en un `ReadableStream`
+    const readableStream = new Readable();
+    readableStream.push(buffer);
+    readableStream.push(null);
+
+    // 📌 Subir audio a Google Drive
+    console.log("📤 Subiendo audio a Google Drive...");
+    const fileId = uuidv4();
+    const audioDriveLink = await uploadToDrive(readableStream, `audio-${fileId}${ext}`, file.type);
+
+    // 📌 Convertimos `Buffer` a `File` para Whisper
     const fileBlob = new Blob([buffer], { type: file.type });
     const fileToSend = new File([fileBlob], file.name, { type: file.type, lastModified: Date.now() });
 
-    // 📌 Subir el audio directamente a Google Drive
-    console.log("📤 Subiendo audio a Google Drive...");
-    const audioDriveLink = await uploadToDrive(buffer, `audio-${fileId}${ext}`, file.type);
-
-    console.log("📡 Enviando audio a OpenAI Whisper para transcripción...");
+    console.log("📡 Enviando a OpenAI Whisper...");
     const whisperResponse = await openai.audio.transcriptions.create({
       model: "whisper-1",
-      file: fileToSend, // ✅ Enviamos un `File` válido
+      file: fileToSend,
     });
 
     if (!whisperResponse.text) {
@@ -70,11 +75,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No se pudo obtener la transcripción." }, { status: 500 });
     }
 
-    console.log(`✅ Transcripción completada para ${file.name}`);
+    console.log("✅ Transcripción completada");
 
-    // 📌 Guardar la transcripción en Google Drive
+    // 📌 Convertimos transcripción en `Buffer` para Google Drive
     const txtBuffer = Buffer.from(whisperResponse.text, "utf-8");
-    const txtDriveLink = await uploadToDrive(txtBuffer, `transcripcion-${fileId}.txt`, "text/plain");
+    const txtReadableStream = new Readable();
+    txtReadableStream.push(txtBuffer);
+    txtReadableStream.push(null);
+
+    // 📌 Subir transcripción a Google Drive
+    console.log("📤 Subiendo transcripción...");
+    const txtDriveLink = await uploadToDrive(txtReadableStream, `transcripcion-${fileId}.txt`, "text/plain");
 
     return NextResponse.json({
       fileName: file.name,
@@ -85,7 +96,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("🚨 Error en la transcripción:", error);
-
     return NextResponse.json(
       { 
         error: "Error en la transcripción", 
@@ -96,13 +106,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// 📌 Subir archivos directamente a Google Drive sin escribir en `/tmp/`
-async function uploadToDrive(fileBuffer: Buffer, fileName: string, mimeType: string) {
+// 📌 Subir archivos a Google Drive con `ReadableStream`
+async function uploadToDrive(fileStream: Readable, fileName: string, mimeType: string) {
   console.log(`📤 Subiendo archivo a Google Drive: ${fileName}`);
 
   if (!process.env.DRIVE_FOLDER_ID) {
-    console.error("❌ Error: DRIVE_FOLDER_ID no está definido.");
-    throw new Error("DRIVE_FOLDER_ID no está configurado.");
+    console.error("❌ DRIVE_FOLDER_ID no definido.");
+    throw new Error("DRIVE_FOLDER_ID no configurado.");
   }
 
   const response = await drive.files.create({
@@ -113,7 +123,7 @@ async function uploadToDrive(fileBuffer: Buffer, fileName: string, mimeType: str
     },
     media: {
       mimeType,
-      body: fileBuffer,
+      body: fileStream, // ✅ Usamos `ReadableStream`
     },
   });
 
