@@ -4,13 +4,6 @@ import { OpenAI } from "openai";
 import { Readable } from "stream";
 import { v4 as uuidv4 } from "uuid";
 
-// 📌 Variables de entorno
-console.log("🔍 Variables de entorno:");
-console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? "✅ Definida" : "❌ No definida");
-console.log("GOOGLE_CLIENT_EMAIL:", process.env.GOOGLE_CLIENT_EMAIL ? "✅ Definida" : "❌ No definida");
-console.log("GOOGLE_PRIVATE_KEY:", process.env.GOOGLE_PRIVATE_KEY ? "✅ Definida" : "❌ No definida");
-console.log("DRIVE_FOLDER_ID:", process.env.DRIVE_FOLDER_ID ? "✅ Definida" : "❌ No definida");
-
 // 📌 Inicializar OpenAI y Google Auth
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
@@ -23,7 +16,9 @@ if (!privateKey) {
   throw new Error("GOOGLE_PRIVATE_KEY no configurada correctamente.");
 }
 
-
+console.log("GOOGLE_DRIVE_FOLDER_ID:", process.env.GOOGLE_DRIVE_FOLDER_ID);
+console.log("GOOGLE_CLIENT_EMAIL:", process.env.GOOGLE_CLIENT_EMAIL);
+console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY);
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_CLIENT_EMAIL!,
@@ -70,6 +65,7 @@ export async function POST(req: NextRequest) {
     const readableStream = new Readable();
     readableStream.push(buffer);
     readableStream.push(null);
+    console.log("ReadableStream created:", readableStream);
 
     // 📌 Subir audio a Google Drive
     console.log("📤 Subiendo audio a Google Drive...");
