@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef } from "react";
 import { createFFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
-import { MicrophoneIcon } from '@heroicons/react/24/outline';
 declare global {
   interface Window {
     webkitSpeechRecognition: any;
@@ -189,7 +188,7 @@ export default function MicrophoneComponent() {
                   onClick={startRecording}
                   className="p-6 rounded-full bg-[#47CACC] text-white text-3xl shadow-md hover:bg-[#3aa8a9] transition-all"
                 >
-                  < MicrophoneIcon />
+                  🗣️
                 </button>
               )}
             </div>
