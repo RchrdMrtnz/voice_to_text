@@ -12,6 +12,7 @@
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.11.6",
     "@ffmpeg/util": "^0.12.2",
+    "@heroicons/react": "^2.2.0",
     "@types/node": "20.4.1",
     "@types/react": "18.2.14",
     "@types/react-dom": "18.2.6",
@@ -39,6 +40,7 @@
     "wavesurfer.js": "^7.1.4"
   },
   "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.27",
     "@types/mime-types": "^2.1.4"
   }
 }
