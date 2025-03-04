@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { createFFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 
@@ -135,14 +135,10 @@ export default function MicrophoneComponent() {
     const updated = uploadedAudios.map((audio) => {
       if (audio.status === "Pendiente" || audio.status === "Subiendo") {
         changed = true;
-        return { ...audio, status: "Error al subir" };
+        return { ...audio, status: "Error al subir" as const };
       }
       return audio;
-    });
-    if (changed) {
-      setUploadedAudios(updated);
-    }
-
+    });    
     // (Opcional) Podrías redirigir a otra URL, cerrar la ventana, etc.
     // window.location.href = "https://www.google.com";
   };
@@ -323,8 +319,7 @@ export default function MicrophoneComponent() {
     const arrayBuffer = data.buffer.slice(0);
   
     // Retornamos un File a partir de ese ArrayBuffer
-    return new File([arrayBuffer], outputName, { type: "audio/wav" });
-  };
+    return new File([data], outputName, { type: "audio/wav" });  };
 
   // ---------------------------------
   //   TRANSCRIBIR (opcional)
