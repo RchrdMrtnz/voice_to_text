@@ -4,17 +4,10 @@ import { google, drive_v3 } from "googleapis";
 import { v4 as uuidv4 } from "uuid";
 
 // Configuración de autenticación de Google
-let privateKey = process.env.GOOGLE_PRIVATE_KEY;
-if (!privateKey) {
-  console.error("❌ GOOGLE_PRIVATE_KEY no está definida.");
-  throw new Error("GOOGLE_PRIVATE_KEY no configurada correctamente.");
-}
-privateKey = privateKey.replace(/\\n/g, "\n");
-
 const auth = new google.auth.GoogleAuth({
   credentials: {
-    client_email: process.env.GOOGLE_CLIENT_EMAIL!,
-    private_key: privateKey,
+    client_email: process.env.GOOGLE_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
   },
   scopes: ["https://www.googleapis.com/auth/drive.file"],
 });
@@ -55,46 +48,52 @@ export async function POST(req: NextRequest) {
       parents: [process.env.DRIVE_FOLDER_ID!]
     };
 
-    // Configuración de media para subida resumible
-    const media = {
-      mimeType: requestData.fileType,
-      body: '' // Se reemplazará con los chunks
-    };
-
     // Crear sesión de subida resumible
     const res = await drive.files.create({
       requestBody: fileMetadata,
-      media: media,
+      media: {
+        mimeType: requestData.fileType,
+      },
       fields: 'id'
     }, {
-      // Configuración especial para subidas resumibles
       params: { uploadType: 'resumable' },
-      headers: { 'X-Upload-Content-Type': requestData.fileType }
+      headers: {
+        'X-Upload-Content-Type': requestData.fileType,
+        'Content-Type': 'application/json; charset=UTF-8'
+      }
     });
 
-    // Obtener URL de subida desde los headers
-    const uploadUrl = res.config.url;
+    // Obtener URL de subida desde headers
+    const uploadUrl = res.headers.location;
     const fileId = res.data.id;
 
     if (!uploadUrl || !fileId) {
       throw new Error("No se pudo crear la sesión de subida");
     }
 
-    return NextResponse.json({
+    // Configurar respuesta con CORS
+    const response = NextResponse.json({
       uploadUrl,
       fileId,
       fileName: fileMetadata.name,
       message: "Sesión de subida creada correctamente"
     });
 
+    response.headers.set('Access-Control-Allow-Origin', '*');
+    response.headers.set('Access-Control-Allow-Methods', 'POST');
+    
+    return response;
+
   } catch (error) {
     console.error("🚨 Error en la API:", error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error: "Error en el servidor",
         details: error instanceof Error ? error.message : "Error desconocido",
       },
       { status: 500 }
     );
+    response.headers.set('Access-Control-Allow-Origin', '*');
+    return response;
   }
 }

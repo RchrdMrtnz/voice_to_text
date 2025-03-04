@@ -234,134 +234,135 @@ export default function MicrophoneComponent() {
     }
   };
 
-  // ---------------------------------
+// ---------------------------------
 //   SUBIR A DRIVE (con reintentos)
 // ---------------------------------
-  const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
-    if (!fileItem.originalFile) return;
+const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
+  if (!fileItem.originalFile) return;
 
-    try {
-      // Convertir a WAV si es necesario
-      let fileToUpload = fileItem.originalFile;
-      if (ffmpeg && ffmpeg.isLoaded() && !["audio/wav", "audio/mp3"].includes(fileToUpload.type)) {
-        fileToUpload = await convertAudioToWav(fileToUpload);
-      }
+  try {
+    let fileToUpload = fileItem.originalFile;
+    
+    // 1. Convertir a formato compatible si es necesario
+    if (ffmpeg && ffmpeg.isLoaded() && !["audio/wav", "audio/mp3"].includes(fileToUpload.type)) {
+      setProcessingMessage("Convirtiendo audio...");
+      fileToUpload = await convertAudioToWav(fileToUpload);
+    }
 
-      // 1. Iniciar sesión de subida
-      setUploadedAudios(prev => prev.map(audio => 
-        audio.name === fileItem.name 
-          ? { 
-              ...audio, 
-              status: "Iniciando", 
-              progress: 0,
-              uploadUrl: "",
-              fileId: ""
-            } 
-          : audio
-      ));
+    // 2. Iniciar sesión de subida
+    setUploadedAudios(prev => prev.map(audio => 
+      audio.name === fileItem.name ? {
+        ...audio,
+        status: "Iniciando",
+        progress: 0,
+        uploadUrl: "",
+        fileId: ""
+      } : audio
+    ));
 
-      // Obtener URL de subida resumible
-      const initResponse = await fetch("/api/upload-audio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: fileToUpload.name,
-          fileType: fileToUpload.type
-        })
-      });
+    // 3. Obtener URL de subida desde nuestra API
+    const initResponse = await fetch("/api/upload-audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: fileToUpload.name,
+        fileType: fileToUpload.type
+      })
+    });
 
-      if (!initResponse.ok) {
-        throw new Error("Error al iniciar subida");
-      }
+    if (!initResponse.ok) {
+      const errorData = await initResponse.json();
+      throw new Error(errorData.error || "Error al iniciar subida");
+    }
 
-      const { uploadUrl, fileId, fileName } = await initResponse.json();
+    const { uploadUrl, fileId } = await initResponse.json();
 
-      // 2. Subir en chunks
-      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
-      const totalSize = fileToUpload.size;
-      let uploadedBytes = 0;
+    // 4. Configurar estado para subida
+    setUploadedAudios(prev => prev.map(audio => 
+      audio.name === fileItem.name ? {
+        ...audio,
+        status: "Subiendo",
+        uploadUrl,
+        fileId
+      } : audio
+    ));
 
-      setUploadedAudios(prev => prev.map(audio => 
-        audio.name === fileItem.name 
-          ? { 
-              ...audio, 
-              status: "Subiendo", 
-              uploadUrl: uploadUrl, 
-              fileId: fileId 
-            } 
-          : audio
-      ));
+    // 5. Subir en chunks
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+    const fileSize = fileToUpload.size;
+    let uploaded = 0;
+    
+    while (uploaded < fileSize) {
+      const chunk = fileToUpload.slice(uploaded, uploaded + CHUNK_SIZE);
+      const chunkEnd = uploaded + chunk.size - 1;
+      
+      let attempts = 0;
+      while (attempts < 3) {
+        try {
+          const res = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Length": chunk.size.toString(),
+              "Content-Range": `bytes ${uploaded}-${chunkEnd}/${fileSize}`
+            },
+            body: chunk
+          });
 
-      while (uploadedBytes < totalSize) {
-        const chunk = fileToUpload.slice(uploadedBytes, uploadedBytes + CHUNK_SIZE);
-        const chunkSize = chunk.size;
-        const chunkStart = uploadedBytes;
-        const chunkEnd = uploadedBytes + chunkSize - 1;
-
-        let attempts = 0;
-        while (true) {
-          attempts++;
-          try {
-            const res = await fetch(uploadUrl, {
-              method: "PUT",
-              headers: {
-                "Content-Length": `${chunkSize}`,
-                "Content-Range": `bytes ${chunkStart}-${chunkEnd}/${totalSize}`
-              },
-              body: chunk
-            });
-
-            if (res.status === 308) { // Resume incomplete
-              const range = res.headers.get("Range");
-              if (range) {
-                uploadedBytes = parseInt(range.split("-")[1]) + 1;
-              }
-              continue;
+          if (res.status === 308) {
+            const rangeHeader = res.headers.get("Range");
+            if (rangeHeader) {
+              uploaded = parseInt(rangeHeader.split("-")[1]) + 1;
             }
-
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            
-            uploadedBytes += chunkSize;
-            const progress = Math.round((uploadedBytes / totalSize) * 100);
-            
-            setUploadedAudios(prev => prev.map(audio => 
-              audio.name === fileItem.name 
-                ? { ...audio, progress } 
-                : audio
-            ));
-            
-            break;
-          } catch (error) {
-            console.error(`Error en chunk (intento ${attempts}):`, error);
-            if (attempts >= 3) throw error;
-            await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+            continue;
           }
+
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+          uploaded += chunk.size;
+          const progress = Math.round((uploaded / fileSize) * 100);
+          
+          setUploadedAudios(prev => prev.map(audio => 
+            audio.name === fileItem.name ? {
+              ...audio,
+              progress
+            } : audio
+          ));
+          
+          break;
+        } catch (error) {
+          attempts++;
+          console.error(`Intento ${attempts} fallido:`, error);
+          if (attempts >= 3) throw error;
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
         }
       }
-
-      // 3. Finalizar subida
-      setUploadedAudios(prev => prev.map(audio => 
-        audio.name === fileItem.name 
-          ? { 
-              ...audio, 
-              status: "Completado", 
-              progress: 100,
-              audioDriveLink: `https://drive.google.com/file/d/${fileId}/view`
-            } 
-          : audio
-      ));
-
-    } catch (error) {
-      console.error("Error en subida:", error);
-      setUploadedAudios(prev => prev.map(audio => 
-        audio.name === fileItem.name 
-          ? { ...audio, status: "Error al subir" } 
-          : audio
-      ));
-    } finally {
-      setProcessingMessage(null);
+      
+      if (attempts >= 3) throw new Error("Demasiados intentos fallidos");
     }
-  };
+
+    // 6. Finalizar subida
+    setUploadedAudios(prev => prev.map(audio => 
+      audio.name === fileItem.name ? {
+        ...audio,
+        status: "Completado",
+        progress: 100,
+        audioDriveLink: `https://drive.google.com/file/d/${fileId}/view`
+      } : audio
+    ));
+
+  } catch (error) {
+    console.error("Error en subida:", error);
+    setUploadedAudios(prev => prev.map(audio => 
+      audio.name === fileItem.name ? {
+        ...audio,
+        status: "Error al subir",
+        progress: 0
+      } : audio
+    ));
+  } finally {
+    setProcessingMessage(null);
+  }
+};
   // ---------------------------------
   //   CONVERTIR A WAV (opcional)
   // ---------------------------------
