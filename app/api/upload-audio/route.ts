@@ -1,10 +1,9 @@
 // app/api/upload-audio/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { google } from "googleapis";
-import { Readable } from "stream";
+import { google, drive_v3 } from "googleapis";
 import { v4 as uuidv4 } from "uuid";
 
-// Inicializamos Google Auth
+// Configuración de autenticación de Google
 let privateKey = process.env.GOOGLE_PRIVATE_KEY;
 if (!privateKey) {
   console.error("❌ GOOGLE_PRIVATE_KEY no está definida.");
@@ -22,68 +21,77 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: "v3", auth });
 
-const ALLOWED_EXTENSIONS = [".mp3", ".wav", ".m4a", ".ogg", ".flac"];
+const ALLOWED_MIME_TYPES = [
+  'audio/mpeg', // MP3
+  'audio/wav',  // WAV
+  'audio/mp4',  // M4A
+  'audio/ogg',  // OGG
+  'audio/flac'  // FLAC
+];
 
 export async function POST(req: NextRequest) {
   try {
-    console.log("📥 [upload-audio] Recibiendo archivo...");
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
-
-    if (!file) {
-      console.error("❌ No se encontró archivo.");
-      return NextResponse.json({ error: "No se encontró archivo" }, { status: 400 });
-    }
-
-    // Verificamos la extensión del archivo
-    const ext = file.name 
-      ? `.${file.name.split(".").pop()?.toLowerCase()}` 
-      : `.${file.type.split("/").pop()?.toLowerCase()}`;
-
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      console.error("❌ Formato de archivo no compatible:", ext);
+    const requestData = await req.json();
+    
+    // Validación de parámetros
+    if (!requestData.fileName || !requestData.fileType) {
       return NextResponse.json(
-        { error: `Formato de archivo no compatible (${ext})` },
+        { error: "Nombre de archivo y tipo requeridos" },
         { status: 400 }
       );
     }
 
-    // Convertimos File -> Buffer -> ReadableStream
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const readableStream = new Readable();
-    readableStream.push(buffer);
-    readableStream.push(null);
+    // Validar tipo MIME
+    if (!ALLOWED_MIME_TYPES.includes(requestData.fileType)) {
+      return NextResponse.json(
+        { error: "Tipo de archivo no permitido" },
+        { status: 400 }
+      );
+    }
 
-    // Subimos a Drive
-    console.log("📤 Subiendo audio a Google Drive...");
-    const fileId = uuidv4();
-    const response = await drive.files.create({
-      requestBody: {
-        name: `audio-${fileId}${ext}`,
-        mimeType: file.type,
-        parents: [process.env.DRIVE_FOLDER_ID!],
-      },
-      media: {
-        mimeType: file.type,
-        body: readableStream,
-      },
+    // Configuración de metadatos del archivo
+    const fileMetadata: drive_v3.Schema$File = {
+      name: `audio-${uuidv4()}-${requestData.fileName}`,
+      parents: [process.env.DRIVE_FOLDER_ID!]
+    };
+
+    // Configuración de media para subida resumible
+    const media = {
+      mimeType: requestData.fileType,
+      body: '' // Se reemplazará con los chunks
+    };
+
+    // Crear sesión de subida resumible
+    const res = await drive.files.create({
+      requestBody: fileMetadata,
+      media: media,
+      fields: 'id'
+    }, {
+      // Configuración especial para subidas resumibles
+      params: { uploadType: 'resumable' },
+      headers: { 'X-Upload-Content-Type': requestData.fileType }
     });
 
-    console.log(`✅ Audio subido a Drive con ID: ${response.data.id}`);
-    const audioDriveLink = `https://drive.google.com/file/d/${response.data.id}/view`;
+    // Obtener URL de subida desde los headers
+    const uploadUrl = res.config.url;
+    const fileId = res.data.id;
 
-    // Devolvemos el enlace en la respuesta
+    if (!uploadUrl || !fileId) {
+      throw new Error("No se pudo crear la sesión de subida");
+    }
+
     return NextResponse.json({
-      fileName: file.name,
+      uploadUrl,
       fileId,
-      audioDriveLink,
-      message: "Audio subido correctamente a Drive",
+      fileName: fileMetadata.name,
+      message: "Sesión de subida creada correctamente"
     });
+
   } catch (error) {
-    console.error("🚨 Error subiendo audio a Drive:", error);
+    console.error("🚨 Error en la API:", error);
     return NextResponse.json(
       {
-        error: "Error subiendo audio a Drive",
+        error: "Error en el servidor",
         details: error instanceof Error ? error.message : "Error desconocido",
       },
       { status: 500 }

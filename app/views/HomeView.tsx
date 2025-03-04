@@ -16,10 +16,13 @@ declare global {
 
 interface UploadedAudio {
   name: string;
-  status: "Pendiente" | "Subiendo" | "Completado" | "Error al subir";
+  status: "Pendiente" | "Iniciando" | "Subiendo" | "Completado" | "Error al subir";
   audioDriveLink?: string;
   originalFile?: File;
   transcription?: string;
+  progress?: number;          // Nuevo campo
+  uploadUrl?: string;         // Nuevo campo
+  fileId?: string;            // Nuevo campo
 }
 
 // Inicializar FFmpeg solo en el cliente
@@ -148,7 +151,7 @@ export default function MicrophoneComponent() {
   // ---------------------------------
   const startRecording = async () => {
     setIsRecording(true);
-    setProcessingMessage("Grabando audio...");
+    setProcessingMessage("Grabando");
     setRecordingSeconds(0); // Reiniciamos la cuenta
 
     // Iniciar el intervalo para sumar 1 segundo cada vez
@@ -232,66 +235,133 @@ export default function MicrophoneComponent() {
   };
 
   // ---------------------------------
-  //   SUBIR A DRIVE (con reintentos)
-  // ---------------------------------
+//   SUBIR A DRIVE (con reintentos)
+// ---------------------------------
   const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
     if (!fileItem.originalFile) return;
 
-    // Si necesitas convertir a WAV, aquí lo harías:
-    let fileToUpload = fileItem.originalFile;
-    if (ffmpeg && ffmpeg.isLoaded() && !["audio/wav", "audio/mp3"].includes(fileToUpload.type)) {
-      fileToUpload = await convertAudioToWav(fileToUpload);
-    }
-
-    // Cambiamos status a "Subiendo"
-    setUploadedAudios((prev) =>
-      prev.map((audio) =>
-        audio.name === fileItem.name ? { ...audio, status: "Subiendo" } : audio
-      )
-    );
-
-    setProcessingMessage("Subiendo audio a Drive...");
-
-    // Reintentar indefinidamente
-    let attempts = 0;
-    while (true) {
-      try {
-        attempts++;
-
-        const formData = new FormData();
-        formData.append("file", fileToUpload);
-
-        const res = await fetch("/api/upload-audio", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.error || "Error desconocido al subir");
-        }
-
-        const data = await res.json();
-
-        // Subida exitosa
-        setUploadedAudios((prev) =>
-          prev.map((audio) =>
-            audio.name === fileItem.name
-              ? { ...audio, status: "Completado", audioDriveLink: data.audioDriveLink }
-              : audio
-          )
-        );
-
-        setProcessingMessage(null);
-        return; // Salimos del while(true) al completar
-      } catch (error) {
-        console.error(`Error al subir (intento #${attempts}):`, error);
-        // Esperamos 3 segundos y reintentamos
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+    try {
+      // Convertir a WAV si es necesario
+      let fileToUpload = fileItem.originalFile;
+      if (ffmpeg && ffmpeg.isLoaded() && !["audio/wav", "audio/mp3"].includes(fileToUpload.type)) {
+        fileToUpload = await convertAudioToWav(fileToUpload);
       }
+
+      // 1. Iniciar sesión de subida
+      setUploadedAudios(prev => prev.map(audio => 
+        audio.name === fileItem.name 
+          ? { 
+              ...audio, 
+              status: "Iniciando", 
+              progress: 0,
+              uploadUrl: "",
+              fileId: ""
+            } 
+          : audio
+      ));
+
+      // Obtener URL de subida resumible
+      const initResponse = await fetch("/api/upload-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: fileToUpload.name,
+          fileType: fileToUpload.type
+        })
+      });
+
+      if (!initResponse.ok) {
+        throw new Error("Error al iniciar subida");
+      }
+
+      const { uploadUrl, fileId, fileName } = await initResponse.json();
+
+      // 2. Subir en chunks
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+      const totalSize = fileToUpload.size;
+      let uploadedBytes = 0;
+
+      setUploadedAudios(prev => prev.map(audio => 
+        audio.name === fileItem.name 
+          ? { 
+              ...audio, 
+              status: "Subiendo", 
+              uploadUrl: uploadUrl, 
+              fileId: fileId 
+            } 
+          : audio
+      ));
+
+      while (uploadedBytes < totalSize) {
+        const chunk = fileToUpload.slice(uploadedBytes, uploadedBytes + CHUNK_SIZE);
+        const chunkSize = chunk.size;
+        const chunkStart = uploadedBytes;
+        const chunkEnd = uploadedBytes + chunkSize - 1;
+
+        let attempts = 0;
+        while (true) {
+          attempts++;
+          try {
+            const res = await fetch(uploadUrl, {
+              method: "PUT",
+              headers: {
+                "Content-Length": `${chunkSize}`,
+                "Content-Range": `bytes ${chunkStart}-${chunkEnd}/${totalSize}`
+              },
+              body: chunk
+            });
+
+            if (res.status === 308) { // Resume incomplete
+              const range = res.headers.get("Range");
+              if (range) {
+                uploadedBytes = parseInt(range.split("-")[1]) + 1;
+              }
+              continue;
+            }
+
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            
+            uploadedBytes += chunkSize;
+            const progress = Math.round((uploadedBytes / totalSize) * 100);
+            
+            setUploadedAudios(prev => prev.map(audio => 
+              audio.name === fileItem.name 
+                ? { ...audio, progress } 
+                : audio
+            ));
+            
+            break;
+          } catch (error) {
+            console.error(`Error en chunk (intento ${attempts}):`, error);
+            if (attempts >= 3) throw error;
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+          }
+        }
+      }
+
+      // 3. Finalizar subida
+      setUploadedAudios(prev => prev.map(audio => 
+        audio.name === fileItem.name 
+          ? { 
+              ...audio, 
+              status: "Completado", 
+              progress: 100,
+              audioDriveLink: `https://drive.google.com/file/d/${fileId}/view`
+            } 
+          : audio
+      ));
+
+    } catch (error) {
+      console.error("Error en subida:", error);
+      setUploadedAudios(prev => prev.map(audio => 
+        audio.name === fileItem.name 
+          ? { ...audio, status: "Error al subir" } 
+          : audio
+      ));
+    } finally {
+      setProcessingMessage(null);
     }
   };
-
   // ---------------------------------
   //   CONVERTIR A WAV (opcional)
   // ---------------------------------
@@ -469,9 +539,9 @@ export default function MicrophoneComponent() {
                     {audio.status === "Pendiente" && audio.originalFile && (
                       <button
                         onClick={() => uploadAudioToDrive(audio)}
-                        className="mt-2 sm:mt-0 px-4 py-2 bg-[#47CACC] text-white rounded-md shadow-md hover:bg-[#3aa8a9] transition-all"
+                        className="mt-2 sm:mt-0 px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all"
                       >
-                        Subir a Drive
+                        Subir archivo
                       </button>
                     )}
 
@@ -481,27 +551,10 @@ export default function MicrophoneComponent() {
                         href={audio.audioDriveLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-2 sm:mt-0 px-4 py-2 bg-blue-600 text-white rounded-md shadow-md hover:bg-blue-700 transition-all"
+                        className="mt-2 sm:mt-0 px-4 py-2 bg-blue-600 text-white rounded-full shadow-md hover:bg-blue-700 transition-all"
                       >
-                        Ver en Drive
+                        Ver archivo
                       </a>
-                    )}
-
-                    {/* Botón para transcribir (opcional) */}
-                    {audio.status === "Completado" && audio.originalFile && (
-                      <button
-                        onClick={() => transcribeAudio(audio)}
-                        className="mt-2 sm:mt-0 px-4 py-2 bg-green-600 text-white rounded-md shadow-md hover:bg-green-700 transition-all"
-                      >
-                        Transcribir
-                      </button>
-                    )}
-
-                    {/* Mostrar la transcripción si la hay */}
-                    {audio.transcription && (
-                      <div className="mt-2 text-sm text-gray-700 bg-gray-100 p-2 rounded">
-                        <strong>Transcripción:</strong> {audio.transcription}
-                      </div>
                     )}
                   </li>
                 ))}
