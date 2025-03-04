@@ -1,9 +1,6 @@
-// app/api/upload-audio/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { google, drive_v3 } from "googleapis";
-import { v4 as uuidv4 } from "uuid";
 
-// Configuración de autenticación de Google
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -15,90 +12,68 @@ const auth = new google.auth.GoogleAuth({
 const drive = google.drive({ version: "v3", auth });
 
 const ALLOWED_MIME_TYPES = [
-  'audio/mpeg', // MP3
-  'audio/wav',  // WAV
-  'audio/mp4',  // M4A
-  'audio/ogg',  // OGG
-  'audio/flac'  // FLAC
+  'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/ogg', 'audio/flac',
+  'audio/mp3', 'audio/x-m4a' // Tipos adicionales comunes
 ];
 
 export async function POST(req: NextRequest) {
   try {
     const { fileName, fileType } = await req.json();
-    
-    // 1. Validar parámetros
-    if (!fileName || !fileType) {
+
+    // Validación mejorada
+    if (!fileName?.trim() || !fileType?.trim()) {
       return NextResponse.json(
-        { error: "Se requieren nombre y tipo de archivo" },
+        { error: "Nombre y tipo de archivo son requeridos" },
         { status: 400 }
       );
     }
 
-    // 2. Validar tipo MIME
     if (!ALLOWED_MIME_TYPES.includes(fileType)) {
       return NextResponse.json(
-        { error: "Tipo de archivo no permitido" },
+        { error: `Tipo de archivo no permitido: ${fileType}` },
         { status: 400 }
       );
     }
 
-    // 3. Configurar metadatos
-    const fileMetadata: drive_v3.Schema$File = {
-      name: `audio-${uuidv4()}-${fileName}`,
-      parents: [process.env.DRIVE_FOLDER_ID!]
-    };
-
-    // 4. Crear sesión de subida resumible
-    const res = await drive.files.create(
-      {
-        requestBody: fileMetadata,
-        media: {
-          mimeType: fileType,
-          body: "", // Necesario pero se ignora
-        },
-        fields: "id",
+    // Crear sesión de subida
+    const res = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents: [process.env.DRIVE_FOLDER_ID!],
       },
-      {
-        params: { uploadType: "resumable" },
-        headers: {
-          "X-Upload-Content-Type": fileType,
-          "Content-Type": "application/json; charset=UTF-8",
-        },
+      media: { mimeType: fileType },
+      fields: 'id'
+    }, {
+      params: { uploadType: 'resumable' },
+      headers: {
+        'X-Upload-Content-Type': fileType,
+        'Content-Type': 'application/json; charset=UTF-8'
       }
-    );
+    });
 
-    // 5. Obtener URL de subida desde headers
+    // Obtener URL desde headers
     const uploadUrl = res.headers.location;
     const fileId = res.data.id;
 
     if (!uploadUrl || !fileId) {
-      console.error("Respuesta de Drive:", res);
-      throw new Error("Fallo al obtener URL de subida");
+      console.error("Error en respuesta de Google:", {
+        status: res.status,
+        headers: res.headers,
+        data: res.data
+      });
+      throw new Error("Google Drive no devolvió la URL de subida");
     }
 
-    // 6. Configurar respuesta CORS
-    const response = NextResponse.json({
-      success: true,
-      uploadUrl,
-      fileId,
-      fileName: fileMetadata.name,
-    });
-
-    response.headers.set("Access-Control-Allow-Origin", "*");
-    response.headers.set("Access-Control-Allow-Methods", "POST");
-
-    return response;
+    return NextResponse.json({ uploadUrl, fileId });
 
   } catch (error) {
-    console.error("Error detallado:", error);
-    const response = NextResponse.json(
+    console.error("Error completo:", error);
+    return NextResponse.json(
       {
-        error: "Error al crear sesión de subida",
-        details: error instanceof Error ? error.message : "Error desconocido",
+        error: "Error técnico al configurar la subida",
+        details: error instanceof Error ? error.message : "Contacte al soporte"
       },
       { status: 500 }
     );
-    response.headers.set("Access-Control-Allow-Origin", "*");
-    return response;
   }
 }
