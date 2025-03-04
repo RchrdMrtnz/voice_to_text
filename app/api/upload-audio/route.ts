@@ -24,76 +24,81 @@ const ALLOWED_MIME_TYPES = [
 
 export async function POST(req: NextRequest) {
   try {
-    const requestData = await req.json();
+    const { fileName, fileType } = await req.json();
     
-    // Validación de parámetros
-    if (!requestData.fileName || !requestData.fileType) {
+    // 1. Validar parámetros
+    if (!fileName || !fileType) {
       return NextResponse.json(
-        { error: "Nombre de archivo y tipo requeridos" },
+        { error: "Se requieren nombre y tipo de archivo" },
         { status: 400 }
       );
     }
 
-    // Validar tipo MIME
-    if (!ALLOWED_MIME_TYPES.includes(requestData.fileType)) {
+    // 2. Validar tipo MIME
+    if (!ALLOWED_MIME_TYPES.includes(fileType)) {
       return NextResponse.json(
         { error: "Tipo de archivo no permitido" },
         { status: 400 }
       );
     }
 
-    // Configuración de metadatos del archivo
+    // 3. Configurar metadatos
     const fileMetadata: drive_v3.Schema$File = {
-      name: `audio-${uuidv4()}-${requestData.fileName}`,
+      name: `audio-${uuidv4()}-${fileName}`,
       parents: [process.env.DRIVE_FOLDER_ID!]
     };
 
-    // Crear sesión de subida resumible
-    const res = await drive.files.create({
-      requestBody: fileMetadata,
-      media: {
-        mimeType: requestData.fileType,
+    // 4. Crear sesión de subida resumible
+    const res = await drive.files.create(
+      {
+        requestBody: fileMetadata,
+        media: {
+          mimeType: fileType,
+          body: "", // Necesario pero se ignora
+        },
+        fields: "id",
       },
-      fields: 'id'
-    }, {
-      params: { uploadType: 'resumable' },
-      headers: {
-        'X-Upload-Content-Type': requestData.fileType,
-        'Content-Type': 'application/json; charset=UTF-8'
+      {
+        params: { uploadType: "resumable" },
+        headers: {
+          "X-Upload-Content-Type": fileType,
+          "Content-Type": "application/json; charset=UTF-8",
+        },
       }
-    });
+    );
 
-    // Obtener URL de subida desde headers
+    // 5. Obtener URL de subida desde headers
     const uploadUrl = res.headers.location;
     const fileId = res.data.id;
 
     if (!uploadUrl || !fileId) {
-      throw new Error("No se pudo crear la sesión de subida");
+      console.error("Respuesta de Drive:", res);
+      throw new Error("Fallo al obtener URL de subida");
     }
 
-    // Configurar respuesta con CORS
+    // 6. Configurar respuesta CORS
     const response = NextResponse.json({
+      success: true,
       uploadUrl,
       fileId,
       fileName: fileMetadata.name,
-      message: "Sesión de subida creada correctamente"
     });
 
-    response.headers.set('Access-Control-Allow-Origin', '*');
-    response.headers.set('Access-Control-Allow-Methods', 'POST');
-    
+    response.headers.set("Access-Control-Allow-Origin", "*");
+    response.headers.set("Access-Control-Allow-Methods", "POST");
+
     return response;
 
   } catch (error) {
-    console.error("🚨 Error en la API:", error);
+    console.error("Error detallado:", error);
     const response = NextResponse.json(
       {
-        error: "Error en el servidor",
+        error: "Error al crear sesión de subida",
         details: error instanceof Error ? error.message : "Error desconocido",
       },
       { status: 500 }
     );
-    response.headers.set('Access-Control-Allow-Origin', '*');
+    response.headers.set("Access-Control-Allow-Origin", "*");
     return response;
   }
 }

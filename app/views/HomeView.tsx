@@ -272,7 +272,8 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
 
     if (!initResponse.ok) {
       const errorData = await initResponse.json();
-      throw new Error(errorData.error || "Error al iniciar subida");
+      console.error("Error del servidor:", errorData);
+      throw new Error(errorData.details || "Error en configuración de subida");
     }
 
     const { uploadUrl, fileId } = await initResponse.json();
