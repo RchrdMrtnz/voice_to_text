@@ -3,7 +3,10 @@
 import { useEffect, useState, useRef } from "react";
 import { createFFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
-import Image from "next/image";
+
+// React-Toastify para notificaciones:
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 declare global {
   interface Window {
@@ -22,10 +25,22 @@ interface UploadedAudio {
 // Inicializar FFmpeg solo en el cliente
 const ffmpeg = typeof window !== "undefined" ? createFFmpeg({ log: true }) : null;
 
+// Función auxiliar para formatear un número de segundos a mm:ss
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// Componente principal
 export default function MicrophoneComponent() {
   const [isRecording, setIsRecording] = useState(false);
   const [uploadedAudios, setUploadedAudios] = useState<UploadedAudio[]>([]);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
+
+  // Para mostrar la duración de la grabación
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -38,24 +53,99 @@ export default function MicrophoneComponent() {
     }
   }, []);
 
-  // 2) Interceptar recarga/cierre de la pestaña si hay subidas pendientes
+  // 2) Mostrar una NOTIFICACIÓN con botones si el usuario "abandona" la pestaña
+  //    mientras está grabando o subiendo.
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+    const handleVisibilityChange = () => {
       const haySubidasPendientes = uploadedAudios.some(
         (audio) => audio.status === "Pendiente" || audio.status === "Subiendo"
       );
-      if (haySubidasPendientes) {
-        e.preventDefault();
-        e.returnValue =
-          "Tienes subidas pendientes. Si sales ahora, se perderá el progreso y no se completará la subida.";
+
+      // Si el documento se ha vuelto "invisible" (tab oculta o minimizada)
+      // y tenemos algo en curso (grabando o subiendo), mostramos la notificación.
+      if (document.hidden && (isRecording || haySubidasPendientes)) {
+        showExitNotification();
       }
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [uploadedAudios]);
+  }, [isRecording, uploadedAudios]);
+
+  // ---------------------------------
+  //  FUNCIÓN para mostrar la notificación con 2 botones
+  // ---------------------------------
+  const showExitNotification = () => {
+    // Para evitar múltiples notificaciones, podemos hacer algo
+    // como toast.isActive(...) si quieres. Simplificamos aquí:
+    toast.warn(
+      ({ closeToast }) => (
+        <div>
+          <p className="mb-3">
+            ⚠️ Hay una grabación o una subida en curso.
+            <br />
+            ¿Deseas salir y cancelar todo?
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                // Opción 1: Continuar => solo cierra el Toast
+                closeToast && closeToast();
+              }}
+              className="px-4 py-2 bg-green-600 text-white rounded"
+            >
+              Continuar
+            </button>
+            <button
+              onClick={() => {
+                // Opción 2: "Cerrar" => Forzamos a detener grabaciones
+                handleForceClose();
+                closeToast && closeToast();
+              }}
+              className="px-4 py-2 bg-red-600 text-white rounded"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      ),
+      {
+        // que NO se cierre automáticamente
+        autoClose: false,
+        closeButton: false,
+        // posición, etc.
+        position: "top-center",
+      }
+    );
+  };
+
+  // ¿Qué hacemos si deciden "Cerrar" en la notificación?
+  // Por ejemplo, podemos forzar a detener la grabación
+  // y cancelar subidas pendientes (si quieres).
+  const handleForceClose = () => {
+    if (isRecording) {
+      stopRecording(); // Forzamos a parar
+    }
+
+    // Si hay audios "Pendiente" o "Subiendo",
+    // podrías marcarlos "Error al subir" o algo así:
+    let changed = false;
+    const updated = uploadedAudios.map((audio) => {
+      if (audio.status === "Pendiente" || audio.status === "Subiendo") {
+        changed = true;
+        return { ...audio, status: "Error al subir" };
+      }
+      return audio;
+    });
+    if (changed) {
+      setUploadedAudios(updated);
+    }
+
+    // (Opcional) Podrías redirigir a otra URL, cerrar la ventana, etc.
+    // window.location.href = "https://www.google.com";
+  };
 
   // ---------------------------------
   //  GRABACIÓN DE AUDIO
@@ -63,6 +153,12 @@ export default function MicrophoneComponent() {
   const startRecording = async () => {
     setIsRecording(true);
     setProcessingMessage("Grabando audio...");
+    setRecordingSeconds(0); // Reiniciamos la cuenta
+
+    // Iniciar el intervalo para sumar 1 segundo cada vez
+    intervalRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
 
     recognitionRef.current = new window.webkitSpeechRecognition();
     recognitionRef.current.continuous = true;
@@ -81,6 +177,11 @@ export default function MicrophoneComponent() {
     };
 
     mediaRecorder.onstop = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+
       const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
       const fileName = `Grabación-${Date.now()}.wav`;
 
@@ -95,6 +196,7 @@ export default function MicrophoneComponent() {
       ]);
 
       setProcessingMessage(null);
+      setIsRecording(false);
     };
 
     mediaRecorder.start();
@@ -107,7 +209,6 @@ export default function MicrophoneComponent() {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
     }
-    setIsRecording(false);
   };
 
   // Convierte Blob a File
@@ -187,7 +288,6 @@ export default function MicrophoneComponent() {
 
         setProcessingMessage(null);
         return; // Salimos del while(true) al completar
-
       } catch (error) {
         console.error(`Error al subir (intento #${attempts}):`, error);
         // Esperamos 3 segundos y reintentamos
@@ -204,16 +304,26 @@ export default function MicrophoneComponent() {
       console.warn("FFmpeg no está cargado. Se subirá sin convertir.");
       return file;
     }
+  
     console.log("Convirtiendo a WAV:", file.name);
-
+  
     const inputName = file.name;
     const outputName = "converted-audio.wav";
-
+  
+    // Escribimos el archivo de entrada en el sistema de FFmpeg
     ffmpeg.FS("writeFile", inputName, await fetchFile(file));
+  
+    // Ejecutamos el comando de conversión
     await ffmpeg.run("-i", inputName, "-ar", "16000", "-ac", "1", "-b:a", "192k", outputName);
-
+  
+    // Leemos el archivo convertido (Uint8Array)
     const data = ffmpeg.FS("readFile", outputName);
-    return new File([data.buffer], outputName, { type: "audio/wav" });
+  
+    // Convertimos SharedArrayBuffer a ArrayBuffer normal
+    const arrayBuffer = data.buffer.slice(0);
+  
+    // Retornamos un File a partir de ese ArrayBuffer
+    return new File([arrayBuffer], outputName, { type: "audio/wav" });
   };
 
   // ---------------------------------
@@ -256,16 +366,17 @@ export default function MicrophoneComponent() {
   // ---------------------------------
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full py-20 bg-[#70D7D9]">
+      {/* Contenedor del Toast: importante para mostrar notificaciones */}
+      <ToastContainer />
+
       <div className="bg-white rounded-xl w-full max-w-2xl shadow-lg flex flex-col">
         {/* Encabezado */}
         <div className="w-full h-24 rounded-t-xl flex justify-center items-center bg-[#47CACC]">
-            <Image
-          src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png"
-          alt="Logo de Procencia"
-          width={160}        // Ajusta el width según tu diseño
-          height={80}        // Ajusta el height según tu diseño
-          className="w-40 h-auto"
-        />
+          <img
+            className="w-40 h-fit"
+            src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png"
+            alt="Logo de Procencia"
+          />
         </div>
 
         <div className="px-8 py-12 flex-grow">
@@ -285,11 +396,17 @@ export default function MicrophoneComponent() {
                   onClick={startRecording}
                   className="p-6 rounded-full bg-[#47CACC] text-white text-3xl shadow-md hover:bg-[#3aa8a9] transition-all"
                 >
-                  🗣️
+                  🎤
                 </button>
               )}
             </div>
-            {isRecording && <p className="text-red-500 mt-2">🔴 Grabando...</p>}
+
+            {/* Mostramos los segundos grabados si se está grabando */}
+            {isRecording && (
+              <p className="text-red-500 mt-2">
+                🔴 Grabando... ({formatTime(recordingSeconds)})
+              </p>
+            )}
           </div>
 
           {/* Subida de archivos */}
