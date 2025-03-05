@@ -213,62 +213,83 @@ export default function MicrophoneComponent() {
     return new File([theBlob], fileName, { type: theBlob.type, lastModified: Date.now() });
   };
 
-  // ---------------------------------
-  //   SUBIR AUDIOS (SELECCIONADOS)
-  // ---------------------------------
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files) {
-      const files = Array.from(event.target.files);
-      files.forEach((file) => {
-        setUploadedAudios((prev) => [
-          ...prev,
-          {
-            name: file.name,
-            status: "Pendiente",
-            originalFile: file,
-          },
-        ]);
-      });
-    }
-  };
+ // ---------------------------------
+//   SUBIR AUDIOS (SELECCIONADOS)
+// ---------------------------------
+const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  console.log("📌 Archivos seleccionados para subir:", event.target.files);
+
+  if (event.target.files) {
+    const files = Array.from(event.target.files);
+    files.forEach((file) => {
+      console.log(`📌 Archivo agregado a la lista: ${file.name} - ${file.size} bytes`);
+
+      setUploadedAudios((prev) => [
+        ...prev,
+        {
+          name: file.name,
+          status: "Pendiente",
+          originalFile: file,
+        },
+      ]);
+    });
+  }
+};
 
 // ---------------------------------
 //   SUBIR A DRIVE (Chunks)
 // ---------------------------------
 const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
-  if (!fileItem.originalFile) return;
+  if (!fileItem.originalFile) {
+    console.warn("⚠️ No hay archivo para subir:", fileItem);
+    return;
+  }
 
   try {
     const file = fileItem.originalFile;
-    
+    console.log(`📌 Iniciando subida: ${file.name} - ${file.size} bytes`);
+
     // 1. Obtener URL de subida
-    setUploadedAudios(prev => prev.map(a => 
-      a.name === fileItem.name ? { ...a, status: "Subiendo", progress: 0 } : a
-    ));
+    setUploadedAudios((prev) =>
+      prev.map((a) =>
+        a.name === fileItem.name ? { ...a, status: "Subiendo", progress: 0 } : a
+      )
+    );
 
     const initRes = await fetch("/api/upload-audio", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         fileName: file.name,
-        fileType: file.type
-      })
+        fileType: file.type,
+      }),
     });
 
-    const { uploadUrl } = await initRes.json();
-    
+    const initData = await initRes.json();
+    console.log("📌 Respuesta de /api/upload-audio:", initData);
+
+    if (!initRes.ok) {
+      throw new Error(`Error en la inicialización: ${initData.error}`);
+    }
+
+    const uploadUrl = initData.uploadUrl;
+
     // Validar URL
-    if (!uploadUrl.startsWith('https://')) {
+    if (!uploadUrl || !uploadUrl.startsWith("https://")) {
+      console.error("⚠️ URL de subida inválida:", uploadUrl);
       throw new Error("URL de subida inválida");
     }
 
+    console.log("✅ URL de subida obtenida correctamente:", uploadUrl);
+
     // 2. Subir en chunks
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB por chunk
     let uploaded = 0;
 
     while (uploaded < file.size) {
       const chunk = file.slice(uploaded, uploaded + CHUNK_SIZE);
       const chunkEnd = uploaded + chunk.size - 1;
+      console.log(`📌 Subiendo chunk ${uploaded}-${chunkEnd} de ${file.size}`);
 
       let attempts = 0;
       while (attempts < 3) {
@@ -277,48 +298,71 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
             method: "PUT",
             headers: {
               "Content-Length": chunk.size.toString(),
-              "Content-Range": `bytes ${uploaded}-${chunkEnd}/${file.size}`
+              "Content-Range": `bytes ${uploaded}-${chunkEnd}/${file.size}`,
             },
-            body: chunk
+            body: chunk,
           });
 
+          console.log(`📌 Respuesta del chunk ${uploaded}-${chunkEnd}:`, res.status);
+
           if (res.status === 308) {
-            const rangeHeader = res.headers.get('Range');
-            if (rangeHeader) uploaded = parseInt(rangeHeader.split('-')[1]) + 1;
+            // Subida incompleta, seguir enviando chunks
+            const rangeHeader = res.headers.get("Range");
+            console.log("📌 Nuevo rango recibido en headers:", rangeHeader);
+            if (rangeHeader) uploaded = parseInt(rangeHeader.split("-")[1]) + 1;
             continue;
+          }
+
+          if (!res.ok) {
+            throw new Error(`Error en chunk ${uploaded}-${chunkEnd}: ${res.statusText}`);
           }
 
           uploaded += chunk.size;
           const progress = Math.round((uploaded / file.size) * 100);
-          
-          setUploadedAudios(prev => prev.map(a => 
-            a.name === fileItem.name ? { ...a, progress } : a
-          ));
+          console.log(`✅ Chunk subido (${progress}%)`);
+
+          setUploadedAudios((prev) =>
+            prev.map((a) =>
+              a.name === fileItem.name ? { ...a, progress } : a
+            )
+          );
           break;
         } catch (error) {
           attempts++;
+          console.error(`❌ Error en el chunk ${uploaded}-${chunkEnd}. Intento ${attempts}`, error);
           if (attempts >= 3) throw error;
-          await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+          await new Promise((resolve) => setTimeout(resolve, 2000 * attempts));
         }
       }
     }
 
     // 3. Obtener enlace final
-    const fileId = uploadUrl.split('/').pop()?.split('?')[0];
-    setUploadedAudios(prev => prev.map(a => 
-      a.name === fileItem.name ? { 
-        ...a, 
-        status: "Completado", 
-        audioDriveLink: `https://drive.google.com/file/d/${fileId}/view` 
-      } : a
-    ));
+    const fileId = uploadUrl.split("/").pop()?.split("?")[0];
+    console.log("✅ Subida completada. ID del archivo:", fileId);
 
+    setUploadedAudios((prev) =>
+      prev.map((a) =>
+        a.name === fileItem.name
+          ? {
+              ...a,
+              status: "Completado",
+              audioDriveLink: `https://drive.google.com/file/d/${fileId}/view`,
+            }
+          : a
+      )
+    );
+
+    console.log("✅ Archivo disponible en Drive:", `https://drive.google.com/file/d/${fileId}/view`);
   } catch (error) {
-    setUploadedAudios(prev => prev.map(a => 
-      a.name === fileItem.name ? { ...a, status: "Error al subir" } : a
-    ));
+    console.error("❌ Error en la subida:", error);
+    setUploadedAudios((prev) =>
+      prev.map((a) =>
+        a.name === fileItem.name ? { ...a, status: "Error al subir" } : a
+      )
+    );
   }
 };
+
   // ---------------------------------
   //   CONVERTIR A WAV (opcional)
   // ---------------------------------
@@ -508,7 +552,7 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
                         href={audio.audioDriveLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-2 sm:mt-0 px-4 py-2 bg-blue-600 text-white rounded-md shadow-md hover:bg-blue-700 transition-all"
+                        className="mt-2 sm:mt-0 px-4 py-2 text-sm bg-blue-600 text-white rounded-full shadow-md hover:bg-blue-700 transition-all"
                       >
                         Ver en Drive
                       </a>
