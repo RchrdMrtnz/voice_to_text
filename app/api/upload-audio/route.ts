@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { google, drive_v3 } from "googleapis";
+import { google } from "googleapis";
+import { Readable } from "stream";
 
 const auth = new google.auth.GoogleAuth({
   credentials: {
@@ -12,67 +13,55 @@ const auth = new google.auth.GoogleAuth({
 const drive = google.drive({ version: "v3", auth });
 
 const ALLOWED_MIME_TYPES = [
-  'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/ogg', 'audio/flac',
-  'audio/mp3', 'audio/x-m4a' // Tipos adicionales comunes
+  'audio/mpeg', 'audio/wav', 'audio/mp4', 
+  'audio/ogg', 'audio/flac', 'audio/x-m4a'
 ];
 
 export async function POST(req: NextRequest) {
   try {
-    const { fileName, fileType } = await req.json();
+    const formData = await req.formData();
+    const file = formData.get("file") as File;
 
-    // Validación mejorada
-    if (!fileName?.trim() || !fileType?.trim()) {
+    if (!file) {
+      return NextResponse.json({ error: "Archivo requerido" }, { status: 400 });
+    }
+
+    // Validar tipo MIME
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       return NextResponse.json(
-        { error: "Nombre y tipo de archivo son requeridos" },
+        { error: `Formato no soportado: ${file.type}` }, 
         { status: 400 }
       );
     }
 
-    if (!ALLOWED_MIME_TYPES.includes(fileType)) {
-      return NextResponse.json(
-        { error: `Tipo de archivo no permitido: ${fileType}` },
-        { status: 400 }
-      );
-    }
+    // Convertir a stream
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const readableStream = new Readable();
+    readableStream.push(buffer);
+    readableStream.push(null);
 
-    // Crear sesión de subida
-    const res = await drive.files.create({
+    // Subir a Drive
+    const response = await drive.files.create({
       requestBody: {
-        name: fileName,
+        name: file.name,
+        mimeType: file.type,
         parents: [process.env.DRIVE_FOLDER_ID!],
       },
-      media: { mimeType: fileType },
-      fields: 'id'
-    }, {
-      params: { uploadType: 'resumable' },
-      headers: {
-        'X-Upload-Content-Type': fileType,
-        'Content-Type': 'application/json; charset=UTF-8'
-      }
+      media: {
+        mimeType: file.type,
+        body: readableStream,
+      },
     });
 
-    // Obtener URL desde headers
-    const uploadUrl = res.headers.location;
-    const fileId = res.data.id;
-
-    if (!uploadUrl || !fileId) {
-      console.error("Error en respuesta de Google:", {
-        status: res.status,
-        headers: res.headers,
-        data: res.data
-      });
-      throw new Error("Google Drive no devolvió la URL de subida");
-    }
-
-    return NextResponse.json({ uploadUrl, fileId });
+    return NextResponse.json({
+      audioDriveLink: `https://drive.google.com/file/d/${response.data.id}/view`,
+      fileName: file.name
+    });
 
   } catch (error) {
-    console.error("Error completo:", error);
+    console.error("Error:", error);
     return NextResponse.json(
-      {
-        error: "Error técnico al configurar la subida",
-        details: error instanceof Error ? error.message : "Contacte al soporte"
-      },
+      { error: "Error al subir el archivo" },
       { status: 500 }
     );
   }
