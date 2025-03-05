@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google, drive_v3 } from "googleapis";
 import formidable from "formidable";
-import fs from "fs"; 
+import fs from "fs";
+import path from "path";
+import { promisify } from "util";
 
-export const runtime = 'nodejs'; // ✅ Nueva configuración para Next.js 13+
+// 🚀 Configuración de Next.js para evitar errores de tamaño de archivo
+export const runtime = "nodejs";
+export const maxDuration = 60; // 60s de ejecución
+export const maxContentLengthBytes = 50 * 1024 * 1024; // 50MB de límite de archivo
 
+// 🛠 Convertimos `fs.rename` a una promesa para manejar archivos correctamente
+const renameAsync = promisify(fs.rename);
+
+// ✅ Validación de variables de entorno
 const clientEmail = process.env.GOOGLE_CLIENT_EMAIL as string;
 const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n") as string;
 const driveFolderId = process.env.DRIVE_FOLDER_ID as string;
@@ -13,6 +22,7 @@ if (!clientEmail || !privateKey || !driveFolderId) {
   throw new Error("❌ Faltan credenciales de Google Drive en las variables de entorno.");
 }
 
+// 🔐 Autenticación con Google Drive
 const auth = new google.auth.GoogleAuth({
   credentials: { client_email: clientEmail, private_key: privateKey },
   scopes: ["https://www.googleapis.com/auth/drive.file"],
@@ -20,9 +30,14 @@ const auth = new google.auth.GoogleAuth({
 
 const drive: drive_v3.Drive = google.drive({ version: "v3", auth });
 
-async function parseForm(req: NextRequest): Promise<{ fields: any; files: formidable.Files }> {
-  const form = formidable({ multiples: false });
+// 📝 Configuración de `formidable` para manejar archivos correctamente
+const form = formidable({
+  multiples: false,
+  keepExtensions: true, // Mantiene la extensión original del archivo
+  uploadDir: "/tmp", // Directorio temporal para almacenar el archivo antes de subirlo
+});
 
+async function parseForm(req: NextRequest): Promise<{ fields: any; files: formidable.Files }> {
   return new Promise((resolve, reject) => {
     form.parse(req as any, (err, fields, files) => {
       if (err) reject(err);
@@ -31,19 +46,28 @@ async function parseForm(req: NextRequest): Promise<{ fields: any; files: formid
   });
 }
 
+// 🚀 API para manejar la subida de archivos
 export async function POST(req: NextRequest) {
   console.log("📌 Recibiendo archivo en el backend...");
 
   try {
+    // 📝 Procesamos el archivo enviado
     const { files } = await parseForm(req);
 
     if (!files.file) {
       return NextResponse.json({ error: "No se recibió archivo" }, { status: 400 });
     }
 
+    // 📌 Manejo del archivo recibido
     const file = Array.isArray(files.file) ? files.file[0] : files.file;
     console.log("📌 Archivo recibido:", file.originalFilename);
 
+    // 📂 Movemos el archivo a un lugar seguro antes de subirlo
+    const tempFilePath = file.filepath;
+    const newFilePath = path.join("/tmp", file.newFilename);
+    await renameAsync(tempFilePath, newFilePath);
+
+    // 🏗️ Configuración del archivo para Google Drive
     const fileMetadata: drive_v3.Schema$File = {
       name: file.originalFilename!,
       parents: [driveFolderId],
@@ -51,9 +75,10 @@ export async function POST(req: NextRequest) {
 
     const media = {
       mimeType: file.mimetype!,
-      body: fs.createReadStream(file.filepath),
+      body: fs.createReadStream(newFilePath),
     };
 
+    // 🚀 Subimos el archivo a Google Drive
     const response = await drive.files.create({
       requestBody: fileMetadata,
       media,
