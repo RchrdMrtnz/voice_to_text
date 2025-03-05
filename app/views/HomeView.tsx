@@ -256,7 +256,7 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
       )
     );
 
-    const initRes = await fetch("/api/upload-audio", {
+    const initRes = await fetch("/api/audio", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
