@@ -5,10 +5,8 @@ import fs from "fs";
 import path from "path";
 import { promisify } from "util";
 
-// 🚀 Configuración de Next.js para evitar errores de tamaño de archivo
-export const runtime = "nodejs";
-export const maxDuration = 60; // 60s de ejecución
-export const maxContentLengthBytes = 50 * 1024 * 1024; // 50MB de límite de archivo
+// 🚀 Configuración de Next.js
+export const runtime = "nodejs"; // Definir el entorno de ejecución para Next.js 13+
 
 // 🛠 Convertimos `fs.rename` a una promesa para manejar archivos correctamente
 const renameAsync = promisify(fs.rename);
@@ -34,6 +32,7 @@ const drive: drive_v3.Drive = google.drive({ version: "v3", auth });
 const form = formidable({
   multiples: false,
   keepExtensions: true, // Mantiene la extensión original del archivo
+  maxFileSize: 50 * 1024 * 1024, // Límite de tamaño de archivo: 50MB
   uploadDir: "/tmp", // Directorio temporal para almacenar el archivo antes de subirlo
 });
 
