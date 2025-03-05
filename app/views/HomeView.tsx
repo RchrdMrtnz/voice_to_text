@@ -98,25 +98,6 @@ export default function MicrophoneComponent() {
     }
   };
 
-  // 📌 Función para convertir archivos de audio a WAV antes de enviarlos a Whisper
-  const convertAudioToWav = async (file: File): Promise<File> => {
-    if (!ffmpeg || !ffmpeg.isLoaded()) {
-      console.error("❌ FFmpeg no está cargado.");
-      return file; // Si FFmpeg no está cargado, enviar el archivo sin convertir
-    }
-
-    console.log("🎵 Convirtiendo archivo a WAV:", file.name);
-
-    const inputName = file.name;
-    const outputName = "converted-audio.wav";
-
-    ffmpeg.FS("writeFile", inputName, await fetchFile(file));
-    await ffmpeg.run("-i", inputName, "-ar", "16000", "-ac", "1", "-b:a", "192k", outputName);
-
-    const data = ffmpeg.FS("readFile", outputName);
-
-    return new File([data.buffer], outputName, { type: "audio/wav" });
-  };
 
   const uploadAudio = async (audioFile: File | Blob, fileName: string) => {
     setUploadedAudios((prev) =>
@@ -128,34 +109,24 @@ export default function MicrophoneComponent() {
     setProcessingMessage("⏳ Procesando audio...");
   
     try {
-      // 📌 1️⃣ Obtener URL firmada desde tu backend
-      const urlResponse = await fetch("/api/transcribe");
-      const { uploadUrl, fileIdDrive } = await urlResponse.json();
+      const formData = new FormData();
+      formData.append("file", audioFile);
   
-      if (!uploadUrl) {
-        throw new Error("No se pudo obtener la URL de subida.");
-      }
-  
-      // 📌 2️⃣ Subir el archivo directamente a Google Drive
-      const response = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "audio/wav" },
-        body: audioFile,
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        body: formData,
       });
   
-      if (!response.ok) {
-        throw new Error("Error al subir el archivo.");
+      const data = await response.json();
+      if (!data.audioDriveLink) {
+        throw new Error("No se pudo subir el archivo.");
       }
   
-      console.log("✅ Audio subido a Drive:", fileIdDrive);
+      console.log("✅ Audio subido a Drive:", data.audioDriveLink);
       setUploadedAudios((prev) =>
         prev.map((audio) =>
           audio.name === fileName
-            ? {
-                ...audio,
-                status: "Completado",
-                audioLink: `https://drive.google.com/file/d/${fileIdDrive}/view`,
-              }
+            ? { ...audio, status: "Completado", audioLink: data.audioDriveLink }
             : audio
         )
       );
