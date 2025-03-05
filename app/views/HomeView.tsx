@@ -236,54 +236,129 @@ export default function MicrophoneComponent() {
   // ---------------------------------
   //   SUBIR A BACKEND PARA DRIVE
   // ---------------------------------
+  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+
   const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
-    if (!fileItem.originalFile) return;
-
+    if (!fileItem.originalFile) {
+      console.warn("⚠️ No hay archivo para subir:", fileItem);
+      return;
+    }
+  
     try {
-      console.log(`📌 Enviando ${fileItem.name} al backend...`);
-
+      const file = fileItem.originalFile;
+      console.log(`📌 Iniciando subida: ${file.name} - ${file.size} bytes`);
+  
+      // 1️⃣ **Solicitar URL de subida en el backend**
       setUploadedAudios((prev) =>
         prev.map((a) =>
-          a.name === fileItem.name ? { ...a, status: "Subiendo" } : a
+          a.name === fileItem.name ? { ...a, status: "Subiendo", progress: 0 } : a
         )
       );
-
-      const formData = new FormData();
-      formData.append("file", fileItem.originalFile);
-
-      const response = await fetch("/api/upload-file", {
+  
+      const initRes = await fetch("/api/upload-file", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+        }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Error desconocido en la subida");
+  
+      const initData = await initRes.json();
+      console.log("📌 Respuesta de /api/upload-file:", initData);
+  
+      if (!initRes.ok) {
+        throw new Error(`Error en la inicialización: ${initData.error}`);
       }
-
-      console.log("✅ Archivo subido correctamente:", data);
-
+  
+      const uploadUrl = initData.uploadUrl;
+  
+      if (!uploadUrl || !uploadUrl.startsWith("https://")) {
+        console.error("⚠️ URL de subida inválida:", uploadUrl);
+        throw new Error("URL de subida inválida");
+      }
+  
+      console.log("✅ URL de subida obtenida correctamente:", uploadUrl);
+  
+      // 2️⃣ **Subir el archivo en chunks de 5MB**
+      let uploaded = 0;
+  
+      while (uploaded < file.size) {
+        const chunk = file.slice(uploaded, uploaded + CHUNK_SIZE);
+        const chunkEnd = uploaded + chunk.size - 1;
+        console.log(`📌 Subiendo chunk ${uploaded}-${chunkEnd} de ${file.size}`);
+  
+        let attempts = 0;
+        while (attempts < 3) {
+          try {
+            const res = await fetch(uploadUrl, {
+              method: "PUT",
+              headers: {
+                "Content-Length": chunk.size.toString(),
+                "Content-Range": `bytes ${uploaded}-${chunkEnd}/${file.size}`,
+              },
+              body: chunk,
+            });
+  
+            console.log(`📌 Respuesta del chunk ${uploaded}-${chunkEnd}:`, res.status);
+  
+            if (res.status === 308) {
+              // Subida incompleta, continuar
+              const rangeHeader = res.headers.get("Range");
+              if (rangeHeader) uploaded = parseInt(rangeHeader.split("-")[1]) + 1;
+              continue;
+            }
+  
+            if (!res.ok) {
+              throw new Error(`Error en chunk ${uploaded}-${chunkEnd}: ${res.statusText}`);
+            }
+  
+            uploaded += chunk.size;
+            const progress = Math.round((uploaded / file.size) * 100);
+            console.log(`✅ Chunk subido (${progress}%)`);
+  
+            setUploadedAudios((prev) =>
+              prev.map((a) =>
+                a.name === fileItem.name ? { ...a, progress } : a
+              )
+            );
+            break;
+          } catch (error) {
+            attempts++;
+            console.error(`❌ Error en el chunk ${uploaded}-${chunkEnd}. Intento ${attempts}`, error);
+            if (attempts >= 3) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 2000 * attempts));
+          }
+        }
+      }
+  
+      // 3️⃣ **Confirmar la subida y obtener el enlace**
+      const fileId = uploadUrl.split("/").pop()?.split("?")[0];
+      console.log("✅ Subida completada. ID del archivo:", fileId);
+  
       setUploadedAudios((prev) =>
-        prev.map((audio) =>
-          audio.name === fileItem.name
-            ? { ...audio, status: "Completado", audioDriveLink: data.fileUrl }
-            : audio
+        prev.map((a) =>
+          a.name === fileItem.name
+            ? {
+                ...a,
+                status: "Completado",
+                audioDriveLink: `https://drive.google.com/file/d/${fileId}/view`,
+              }
+            : a
         )
       );
-
-      toast.success(`✅ Archivo subido: ${fileItem.name}`);
+  
+      console.log("✅ Archivo disponible en Drive:", `https://drive.google.com/file/d/${fileId}/view`);
     } catch (error) {
-      console.error("❌ Error al subir archivo:", error);
+      console.error("❌ Error en la subida:", error);
       setUploadedAudios((prev) =>
         prev.map((a) =>
           a.name === fileItem.name ? { ...a, status: "Error al subir" } : a
         )
       );
-      toast.error("❌ Error en la subida del archivo");
     }
   };
-
+  
 
   // ---------------------------------
   //   CONVERTIR A WAV (opcional)
