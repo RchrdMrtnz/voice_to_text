@@ -6,59 +6,56 @@ const auth = new google.auth.GoogleAuth({
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
     private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
   },
-  scopes: ["https://www.googleapis.com/auth/drive"],
+  scopes: ["https://www.googleapis.com/auth/drive.file"],
 });
 
 const drive = google.drive({ version: "v3", auth });
 
 export async function POST(req: NextRequest) {
-  console.log("📌 Nueva solicitud recibida en /api/upload-audio");
+  console.log("📌 Recibiendo solicitud en /api/upload-file");
 
   try {
-    const body = await req.json();
-    console.log("📌 Datos recibidos en API:", body);
-
-    const { fileName, fileType } = body;
+    const { fileName, fileType } = await req.json();
 
     if (!fileName || !fileType) {
-      console.error("⚠️ Faltan parámetros obligatorios:", { fileName, fileType });
+      console.error("⚠️ Faltan parámetros:", { fileName, fileType });
       return NextResponse.json(
         { error: "Se requieren 'fileName' y 'fileType'" },
         { status: 400 }
       );
     }
 
-    console.log(`📌 Intentando crear archivo en Google Drive: ${fileName} (${fileType})`);
+    console.log(`📌 Creando metadatos en Google Drive para: ${fileName} (${fileType})`);
 
-    // Crear el archivo en Google Drive sin contenido (solo metadata)
+    // 1️⃣ Crear el archivo en Google Drive sin contenido
     const fileMetadata = {
       name: fileName,
-      parents: [process.env.DRIVE_FOLDER_ID!],
       mimeType: fileType,
+      parents: [process.env.DRIVE_FOLDER_ID!],
     };
 
-    const fileResponse = await drive.files.create({
+    const file = await drive.files.create({
       requestBody: fileMetadata,
       fields: "id",
     });
 
-    console.log("📌 Respuesta de Google Drive:", fileResponse.data);
-
-    if (!fileResponse.data.id) {
-      console.error("⚠️ No se recibió ID del archivo. Respuesta:", fileResponse.data);
-      throw new Error("No se pudo crear el archivo en Google Drive");
+    if (!file.data.id) {
+      throw new Error("No se pudo obtener el ID del archivo subido.");
     }
 
-    const fileId = fileResponse.data.id;
+    console.log("✅ Archivo creado en Drive con ID:", file.data.id);
 
-    // Construir manualmente la URL de subida resumible
-    const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;
+    // 2️⃣ Pre-generar la URL de subida con el ID
+    const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${file.data.id}?uploadType=resumable`;
 
-    console.log("✅ URL de subida obtenida correctamente:", uploadUrl);
+    console.log("✅ URL de subida generada:", uploadUrl);
 
-    return NextResponse.json({ uploadUrl });
+    return NextResponse.json({
+      fileId: file.data.id,
+      uploadUrl,
+    });
   } catch (error) {
-    console.error("❌ Error en API upload-audio:", error);
+    console.error("❌ Error en la API upload-file:", error);
 
     return NextResponse.json(
       {
