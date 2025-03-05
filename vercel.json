@@ -1,11 +1,9 @@
 {
-    "version": 2,
-    "functions": {
-      "api/upload-file": {
-        "maxDuration": 60,
-        "memory": 1024,
-        "maxSize": "50mb"
-      }
+  "version": 2,
+  "functions": {
+    "api/upload-file": {
+      "maxDuration": 60,
+      "memory": 1024
     }
   }
-  
+}
