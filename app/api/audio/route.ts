@@ -6,7 +6,7 @@ const auth = new google.auth.GoogleAuth({
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
     private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
   },
-  scopes: ["https://www.googleapis.com/auth/drive.file"],
+  scopes: ["https://www.googleapis.com/auth/drive"],
 });
 
 const drive = google.drive({ version: "v3", auth });
@@ -28,34 +28,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`📌 Intentando crear sesión de subida para: ${fileName} (${fileType})`);
+    console.log(`📌 Intentando crear archivo en Google Drive: ${fileName} (${fileType})`);
 
-    const res = await drive.files.create(
-      {
-        requestBody: {
-          name: fileName,
-          parents: [process.env.DRIVE_FOLDER_ID!],
-        },
-        media: { mimeType: fileType },
-      },
-      {
-        params: { uploadType: "resumable" },
-        headers: {
-          "X-Upload-Content-Type": fileType,
-          "Content-Type": "application/json; charset=UTF-8",
-        },
-      }
-    );
+    // Crear el archivo en Google Drive sin contenido (solo metadata)
+    const fileMetadata = {
+      name: fileName,
+      parents: [process.env.DRIVE_FOLDER_ID!],
+      mimeType: fileType,
+    };
 
-    console.log("📌 Respuesta de Google Drive recibida:", res);
+    const fileResponse = await drive.files.create({
+      requestBody: fileMetadata,
+      fields: "id",
+    });
 
-    // Obtener URL de subida desde headers
-    const uploadUrl = res.headers["location"];
+    console.log("📌 Respuesta de Google Drive:", fileResponse.data);
 
-    if (!uploadUrl) {
-      console.error("⚠️ No se recibió URL de subida de Google Drive. Headers:", res.headers);
-      throw new Error("No se recibió URL de subida de Google Drive");
+    if (!fileResponse.data.id) {
+      console.error("⚠️ No se recibió ID del archivo. Respuesta:", fileResponse.data);
+      throw new Error("No se pudo crear el archivo en Google Drive");
     }
+
+    const fileId = fileResponse.data.id;
+
+    // Construir manualmente la URL de subida resumible
+    const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;
 
     console.log("✅ URL de subida obtenida correctamente:", uploadUrl);
 
