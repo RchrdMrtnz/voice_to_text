@@ -1,28 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google, drive_v3 } from "googleapis";
 import formidable from "formidable";
-import fs from "fs"; // ✅ Usa "fs" en vez de "fs/promises"
+import fs from "fs"; 
 
-export const config = {
-  api: {
-    bodyParser: false, // Desactivamos el body parser para manejar archivos correctamente
-  },
-};
+export const runtime = 'nodejs'; // ✅ Nueva configuración para Next.js 13+
 
 const clientEmail = process.env.GOOGLE_CLIENT_EMAIL as string;
 const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n") as string;
 const driveFolderId = process.env.DRIVE_FOLDER_ID as string;
 
-// ✅ Verifica que las credenciales sean válidas
 if (!clientEmail || !privateKey || !driveFolderId) {
   throw new Error("❌ Faltan credenciales de Google Drive en las variables de entorno.");
 }
 
 const auth = new google.auth.GoogleAuth({
-  credentials: {
-    client_email: clientEmail,
-    private_key: privateKey,
-  },
+  credentials: { client_email: clientEmail, private_key: privateKey },
   scopes: ["https://www.googleapis.com/auth/drive.file"],
 });
 
@@ -59,10 +51,9 @@ export async function POST(req: NextRequest) {
 
     const media = {
       mimeType: file.mimetype!,
-      body: fs.createReadStream(file.filepath), // ✅ Usa createReadStream correctamente
+      body: fs.createReadStream(file.filepath),
     };
 
-    // ✅ Corrección: Usar await y asegurar el tipado correcto
     const response = await drive.files.create({
       requestBody: fileMetadata,
       media,
