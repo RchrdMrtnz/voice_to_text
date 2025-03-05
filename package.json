@@ -22,6 +22,7 @@
     "encoding": "^0.1.13",
     "eslint": "8.44.0",
     "eslint-config-next": "13.4.9",
+    "formidable": "^3.5.2",
     "fs": "^0.0.1-security",
     "googleapis": "^144.0.0",
     "mic-recorder-to-mp3": "^2.2.2",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@types/fluent-ffmpeg": "^2.1.27",
+    "@types/formidable": "^3.4.5",
     "@types/mime-types": "^2.1.4"
   }
 }
