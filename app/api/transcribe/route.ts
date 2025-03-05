@@ -1,44 +1,44 @@
-// app/api/transcribe/route.ts
+import { google } from "googleapis";
 import { NextRequest, NextResponse } from "next/server";
-import { OpenAI } from "openai";
+import { v4 as uuidv4 } from "uuid";
 
-// Inicializamos OpenAI
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+let privateKey = process.env.GOOGLE_PRIVATE_KEY;
+if (!privateKey) throw new Error("GOOGLE_PRIVATE_KEY no configurada.");
+privateKey = privateKey.replace(/\\n/g, "\n");
 
-export async function POST(req: NextRequest) {
+const auth = new google.auth.GoogleAuth({
+  credentials: {
+    client_email: process.env.GOOGLE_CLIENT_EMAIL!,
+    private_key: privateKey,
+  },
+  scopes: ["https://www.googleapis.com/auth/drive.file"],
+});
+
+const drive = google.drive({ version: "v3", auth });
+
+export async function GET(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
+    const fileId = uuidv4();
+    const fileName = `audio-${fileId}.wav`;
 
-    if (!file) {
-      return NextResponse.json({ error: "No se encontró archivo" }, { status: 400 });
-    }
+    const fileMetadata = {
+      name: fileName,
+      parents: [process.env.GOOGLE_DRIVE_FOLDER_ID!],
+    };
 
-    // Llamamos a OpenAI Whisper
-    const whisperResponse = await openai.audio.transcriptions.create({
-      model: "whisper-1",
-      file,
+    const file = await drive.files.create({
+      requestBody: fileMetadata,
+      media: { mimeType: "audio/wav", body: "" },
     });
 
-    if (!whisperResponse.text) {
-      return NextResponse.json(
-        { error: "No se pudo obtener la transcripción" },
-        { status: 500 }
-      );
-    }
+    const fileIdDrive = file.data.id;
 
-    return NextResponse.json({
-      text: whisperResponse.text,
-      message: "Transcripción exitosa",
-    });
+    // Generar URL para subir el archivo directamente desde el frontend
+    const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileIdDrive}?uploadType=resumable`;
+
+    return NextResponse.json({ uploadUrl, fileIdDrive });
   } catch (error) {
-    console.error("Error en la transcripción:", error);
-    return NextResponse.json(
-      {
-        error: "Error en la transcripción",
-        details: error instanceof Error ? error.message : "Error desconocido",
-      },
-      { status: 500 }
-    );
+    console.error("🚨 Error generando URL firmada:", error);
+    return NextResponse.json({ error: "Error generando URL" }, { status: 500 });
   }
 }

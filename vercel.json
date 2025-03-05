@@ -1,9 +1,0 @@
-{
-  "version": 2,
-  "functions": {
-    "app/api/upload-file/route": {
-      "maxDuration": 60,
-      "memory": 1024
-    }
-  }
-}

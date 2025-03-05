@@ -1,13 +1,8 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createFFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
-
-// React-Toastify para notificaciones:
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
-
 declare global {
   interface Window {
     webkitSpeechRecognition: any;
@@ -16,146 +11,34 @@ declare global {
 
 interface UploadedAudio {
   name: string;
-  status: "Pendiente" | "Subiendo" | "Completado" | "Error al subir";
-  audioDriveLink?: string;
-  originalFile?: File;
-  transcription?: string;
-  progress?: number;  // Nuevo campo opcional
+  status: "Pendiente" | "Procesando" | "Completado" | "Error al procesar";
+  transcriptLink?: string;
+  audioLink?: string;
 }
 
-// Inicializar FFmpeg solo en el cliente
+// 📌 Inicializar FFmpeg solo en el cliente
 const ffmpeg = typeof window !== "undefined" ? createFFmpeg({ log: true }) : null;
 
-// Función auxiliar para formatear un número de segundos a mm:ss
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// Componente principal
 export default function MicrophoneComponent() {
   const [isRecording, setIsRecording] = useState(false);
   const [uploadedAudios, setUploadedAudios] = useState<UploadedAudio[]>([]);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
 
-  // Para mostrar la duración de la grabación
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
   const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // 1) Cargar FFmpeg si está disponible
+  // 📌 Cargar FFmpeg solo cuando el componente se monta
   useEffect(() => {
     if (ffmpeg && !ffmpeg.isLoaded()) {
-      ffmpeg.load().then(() => console.log("FFmpeg cargado."));
+      console.log("🔄 Cargando FFmpeg...");
+      ffmpeg.load();
     }
   }, []);
 
-  // 2) Mostrar una NOTIFICACIÓN con botones si el usuario "abandona" la pestaña
-  //    mientras está grabando o subiendo.
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      const haySubidasPendientes = uploadedAudios.some(
-        (audio) => audio.status === "Pendiente" || audio.status === "Subiendo"
-      );
-
-      // Si el documento se ha vuelto "invisible" (tab oculta o minimizada)
-      // y tenemos algo en curso (grabando o subiendo), mostramos la notificación.
-      if (document.hidden && (isRecording || haySubidasPendientes)) {
-        showExitNotification();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [isRecording, uploadedAudios]);
-
-  // ---------------------------------
-  //  FUNCIÓN para mostrar la notificación con 2 botones
-  // ---------------------------------
-  const showExitNotification = () => {
-    // Para evitar múltiples notificaciones, podemos hacer algo
-    // como toast.isActive(...) si quieres. Simplificamos aquí:
-    toast.warn(
-      ({ closeToast }) => (
-        <div>
-          <p className="mb-3">
-            ⚠️ Hay una grabación o una subida en curso.
-            <br />
-            ¿Deseas salir y cancelar todo?
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                // Opción 1: Continuar => solo cierra el Toast
-                closeToast && closeToast();
-              }}
-              className="px-4 py-2 bg-green-600 text-white rounded"
-            >
-              Continuar
-            </button>
-            <button
-              onClick={() => {
-                // Opción 2: "Cerrar" => Forzamos a detener grabaciones
-                handleForceClose();
-                closeToast && closeToast();
-              }}
-              className="px-4 py-2 bg-red-600 text-white rounded"
-            >
-              Cerrar
-            </button>
-          </div>
-        </div>
-      ),
-      {
-        // que NO se cierre automáticamente
-        autoClose: false,
-        closeButton: false,
-        // posición, etc.
-        position: "top-center",
-      }
-    );
-  };
-
-  // ¿Qué hacemos si deciden "Cerrar" en la notificación?
-  // Por ejemplo, podemos forzar a detener la grabación
-  // y cancelar subidas pendientes (si quieres).
-  const handleForceClose = () => {
-    if (isRecording) {
-      stopRecording(); // Forzamos a parar
-    }
-
-    // Si hay audios "Pendiente" o "Subiendo",
-    // podrías marcarlos "Error al subir" o algo así:
-    let changed = false;
-    const updated = uploadedAudios.map((audio) => {
-      if (audio.status === "Pendiente" || audio.status === "Subiendo") {
-        changed = true;
-        return { ...audio, status: "Error al subir" as const };
-      }
-      return audio;
-    });    
-    // (Opcional) Podrías redirigir a otra URL, cerrar la ventana, etc.
-    // window.location.href = "https://www.google.com";
-  };
-
-  // ---------------------------------
-  //  GRABACIÓN DE AUDIO
-  // ---------------------------------
   const startRecording = async () => {
     setIsRecording(true);
-    setProcessingMessage("Grabando audio...");
-    setRecordingSeconds(0); // Reiniciamos la cuenta
-
-    // Iniciar el intervalo para sumar 1 segundo cada vez
-    intervalRef.current = setInterval(() => {
-      setRecordingSeconds((prev) => prev + 1);
-    }, 1000);
+    setProcessingMessage("🎙️ Grabando audio...");
 
     recognitionRef.current = new window.webkitSpeechRecognition();
     recognitionRef.current.continuous = true;
@@ -173,27 +56,18 @@ export default function MicrophoneComponent() {
       }
     };
 
-    mediaRecorder.onstop = () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-
+    mediaRecorder.onstop = async () => {
       const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
       const fileName = `Grabación-${Date.now()}.wav`;
 
-      // Agregamos a la lista con status "Pendiente"
-      setUploadedAudios((prev) => [
-        ...prev,
-        {
-          name: fileName,
-          status: "Pendiente",
-          originalFile: blobToFile(audioBlob, fileName),
-        },
-      ]);
+      const newAudio: UploadedAudio = {
+        name: fileName,
+        status: "Pendiente",
+      };
 
+      setUploadedAudios((prev) => [...prev, newAudio]);
       setProcessingMessage(null);
-      setIsRecording(false);
+      await uploadAudio(audioBlob, fileName);
     };
 
     mediaRecorder.start();
@@ -206,193 +80,106 @@ export default function MicrophoneComponent() {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
     }
+    setIsRecording(false);
   };
 
-  // Convierte Blob a File
-  const blobToFile = (theBlob: Blob, fileName: string): File => {
-    return new File([theBlob], fileName, { type: theBlob.type, lastModified: Date.now() });
-  };
-
-
-  // ---------------------------------
-  //   SUBIR AUDIOS (SELECCIONADOS)
-  // ---------------------------------
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       const files = Array.from(event.target.files);
-      files.forEach((file) => {
-        setUploadedAudios((prev) => [
-          ...prev,
-          {
-            name: file.name,
-            status: "Pendiente",
-            originalFile: file,
-          },
-        ]);
+      files.forEach(async (file) => {
+        const newAudio: UploadedAudio = {
+          name: file.name,
+          status: "Pendiente",
+        };
+
+        setUploadedAudios((prev) => [...prev, newAudio]);
+        await uploadAudio(file, file.name);
       });
     }
   };
 
-  // ---------------------------------
-  //   SUBIR A BACKEND PARA DRIVE
-  // ---------------------------------
-  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+  // 📌 Función para convertir archivos de audio a WAV antes de enviarlos a Whisper
+  const convertAudioToWav = async (file: File): Promise<File> => {
+    if (!ffmpeg || !ffmpeg.isLoaded()) {
+      console.error("❌ FFmpeg no está cargado.");
+      return file; // Si FFmpeg no está cargado, enviar el archivo sin convertir
+    }
 
-  const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
-    if (!fileItem.originalFile) return;
+    console.log("🎵 Convirtiendo archivo a WAV:", file.name);
+
+    const inputName = file.name;
+    const outputName = "converted-audio.wav";
+
+    ffmpeg.FS("writeFile", inputName, await fetchFile(file));
+    await ffmpeg.run("-i", inputName, "-ar", "16000", "-ac", "1", "-b:a", "192k", outputName);
+
+    const data = ffmpeg.FS("readFile", outputName);
+
+    return new File([data.buffer], outputName, { type: "audio/wav" });
+  };
+
+  const uploadAudio = async (audioFile: File | Blob, fileName: string) => {
+    setUploadedAudios((prev) =>
+      prev.map((audio) =>
+        audio.name === fileName ? { ...audio, status: "Procesando" } : audio
+      )
+    );
+  
+    setProcessingMessage("⏳ Procesando audio...");
   
     try {
-      console.log(`📌 Enviando ${fileItem.name} al backend...`);
+      // 📌 1️⃣ Obtener URL firmada desde tu backend
+      const urlResponse = await fetch("/api/transcribe");
+      const { uploadUrl, fileIdDrive } = await urlResponse.json();
   
-      setUploadedAudios((prev) =>
-        prev.map((a) =>
-          a.name === fileItem.name ? { ...a, status: "Subiendo" } : a
-        )
-      );
-  
-      // 1️⃣ Solicitar la URL de subida
-      const initRes = await fetch("/api/upload-file", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: fileItem.originalFile.name,
-          fileType: fileItem.originalFile.type,
-        }),
-      });
-  
-      const initData = await initRes.json();
-  
-      if (!initRes.ok) {
-        throw new Error(`Error en la inicialización: ${initData.error}`);
+      if (!uploadUrl) {
+        throw new Error("No se pudo obtener la URL de subida.");
       }
   
-      console.log("📌 URL de subida obtenida:", initData.uploadUrl);
-  
-      // 2️⃣ Subir el archivo directamente a Google Drive
-      const uploadRes = await fetch(initData.uploadUrl, {
+      // 📌 2️⃣ Subir el archivo directamente a Google Drive
+      const response = await fetch(uploadUrl, {
         method: "PUT",
-        headers: {
-          "Content-Type": fileItem.originalFile.type,
-          "Content-Length": fileItem.originalFile.size.toString(),
-        },
-        body: fileItem.originalFile,
+        headers: { "Content-Type": "audio/wav" },
+        body: audioFile,
       });
   
-      if (!uploadRes.ok) {
-        throw new Error(`Error al subir archivo: ${uploadRes.statusText}`);
+      if (!response.ok) {
+        throw new Error("Error al subir el archivo.");
       }
   
-      console.log("✅ Archivo subido correctamente.");
-  
-      // 3️⃣ Generar el enlace de visualización en Drive
-      const fileUrl = `https://drive.google.com/file/d/${initData.fileId}/view`;
-  
+      console.log("✅ Audio subido a Drive:", fileIdDrive);
       setUploadedAudios((prev) =>
         prev.map((audio) =>
-          audio.name === fileItem.name
-            ? { ...audio, status: "Completado", audioDriveLink: fileUrl }
+          audio.name === fileName
+            ? {
+                ...audio,
+                status: "Completado",
+                audioLink: `https://drive.google.com/file/d/${fileIdDrive}/view`,
+              }
             : audio
         )
       );
-  
-      toast.success(`✅ Archivo subido: ${fileItem.name}`);
     } catch (error) {
-      console.error("❌ Error al subir archivo:", error);
-      setUploadedAudios((prev) =>
-        prev.map((a) =>
-          a.name === fileItem.name ? { ...a, status: "Error al subir" } : a
-        )
-      );
-      toast.error("❌ Error en la subida del archivo");
-    }
-  };
-  
-  
-
-  // ---------------------------------
-  //   CONVERTIR A WAV (opcional)
-  // ---------------------------------
-  const convertAudioToWav = async (file: File): Promise<File> => {
-    if (!ffmpeg || !ffmpeg.isLoaded()) {
-      console.warn("FFmpeg no está cargado. Se subirá sin convertir.");
-      return file;
-    }
-  
-    console.log("Convirtiendo a WAV:", file.name);
-  
-    const inputName = file.name;
-    const outputName = "converted-audio.wav";
-  
-    // Escribimos el archivo de entrada en el sistema de FFmpeg
-    ffmpeg.FS("writeFile", inputName, await fetchFile(file));
-  
-    // Ejecutamos el comando de conversión
-    await ffmpeg.run("-i", inputName, "-ar", "16000", "-ac", "1", "-b:a", "192k", outputName);
-  
-    // Leemos el archivo convertido (Uint8Array)
-    const data = ffmpeg.FS("readFile", outputName);
-  
-    // Convertimos SharedArrayBuffer a ArrayBuffer normal
-    const arrayBuffer = data.buffer.slice(0);
-  
-    // Retornamos un File a partir de ese ArrayBuffer
-    return new File([data], outputName, { type: "audio/wav" });  };
-
-  // ---------------------------------
-  //   TRANSCRIBIR (opcional)
-  // ---------------------------------
-  const transcribeAudio = async (fileItem: UploadedAudio) => {
-    if (!fileItem.originalFile) return;
-
-    setProcessingMessage("Transcribiendo audio...");
-
-    try {
-      const formData = new FormData();
-      formData.append("file", fileItem.originalFile);
-
-      const res = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Error desconocido en la transcripción");
-      }
-
-      // Guardamos la transcripción
+      console.error("🚨 Error al subir audio:", error);
       setUploadedAudios((prev) =>
         prev.map((audio) =>
-          audio.name === fileItem.name ? { ...audio, transcription: data.text } : audio
+          audio.name === fileName ? { ...audio, status: "Error al procesar" } : audio
         )
       );
-    } catch (error) {
-      console.error("Error al transcribir:", error);
     } finally {
       setProcessingMessage(null);
     }
   };
+  
 
-  // ---------------------------------
-  //   RENDER
-  // ---------------------------------
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full py-20 bg-[#70D7D9]">
-      {/* Contenedor del Toast: importante para mostrar notificaciones */}
-      <ToastContainer />
-
       <div className="bg-white rounded-xl w-full max-w-2xl shadow-lg flex flex-col">
-        {/* Encabezado */}
+        {/* Grabación de audio */}
         <div className="w-full h-24 rounded-t-xl flex justify-center items-center bg-[#47CACC]">
-          <img
-            className="w-40 h-fit"
-            src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png"
-            alt="Logo de Procencia"
-          />
+          <img className="w-40 h-fit" src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png" alt="Logo de Procencia" />
         </div>
-
         <div className="px-8 py-12 flex-grow">
-          {/* Grabación de audio */}
           <div className="text-center">
             <p className="text-xl font-medium text-gray-700 mb-4">🎤 Graba un audio</p>
             <div className="flex justify-center">
@@ -408,99 +195,65 @@ export default function MicrophoneComponent() {
                   onClick={startRecording}
                   className="p-6 rounded-full bg-[#47CACC] text-white text-3xl shadow-md hover:bg-[#3aa8a9] transition-all"
                 >
-                  🎤
+                  🗣️
                 </button>
               )}
             </div>
-
-            {/* Mostramos los segundos grabados si se está grabando */}
-            {isRecording && (
-              <p className="text-red-500 mt-2">
-                🔴 Grabando... ({formatTime(recordingSeconds)})
-              </p>
-            )}
+            {isRecording && <p className="text-red-500 mt-2">🔴 Grabando...</p>}
           </div>
-
+  
           {/* Subida de archivos */}
           <div className="mt-8 text-center flex flex-col justify-center items-center">
             <p className="text-xl font-medium text-gray-700 mb-4">📂 Sube audios desde tu dispositivo</p>
             <label className="flex flex-col items-center justify-center w-80 h-32 border-2 border-dashed border-[#47CACC] rounded-lg cursor-pointer hover:bg-gray-50 transition-all p-4">
               <span className="text-4xl text-[#47CACC]">📤</span>
-              <span className="text-gray-600 text-sm mt-3">
-                Haz clic aquí o arrastra tus archivos
-              </span>
-              <input
-                type="file"
-                multiple
-                accept="audio/*"
-                className="hidden"
-                onChange={handleFileChange}
-              />
+              <span className="text-gray-600 text-sm mt-3">Haz clic aquí o arrastra tus archivos</span>
+              <input type="file" multiple accept="audio/*" className="hidden" onChange={handleFileChange} />
             </label>
           </div>
-
+  
           {/* Notificación de procesamiento */}
           {processingMessage && (
             <div className="mt-6 p-3 bg-yellow-100 border border-yellow-300 rounded text-yellow-800 text-center">
               {processingMessage}
             </div>
           )}
-
-          {/* Lista de audios */}
+  
+          {/* Lista de audios subidos */}
           {uploadedAudios.length > 0 && (
             <div className="mt-8">
-              <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">
-                📁 Archivos
-              </h3>
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📁 Archivos Subidos</h3>
               <ul className="space-y-3">
                 {uploadedAudios.map((audio, index) => (
-                  <li
-                    key={index}
-                    className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-center"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4 w-full">
-                      <div className="flex items-center">
-                        <span className="text-gray-500 mr-3">{index + 1}.</span>
-                        <span className="text-xl mr-3">🎵</span>
-                        <span className="text-gray-700 font-semibold">{audio.name}</span>
-                      </div>
-
-                      <div>
-                        <span
-                          className={`inline-block mt-2 sm:mt-0 px-3 py-1 rounded-full text-sm font-medium ${
-                            audio.status === "Pendiente"
-                              ? "bg-gray-200 text-gray-700"
-                              : audio.status === "Subiendo"
-                              ? "bg-yellow-200 text-yellow-800"
-                              : audio.status === "Completado"
-                              ? "bg-green-200 text-green-800"
-                              : "bg-red-200 text-red-800"
-                          }`}
-                        >
-                          {audio.status}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Botón Subir a Drive si está "Pendiente" */}
-                    {audio.status === "Pendiente" && audio.originalFile && (
-                      <button
-                        onClick={() => uploadAudioToDrive(audio)}
-                        className="mt-2 sm:mt-0 px-4 py-2 bg-[#47CACC] text-white rounded-md shadow-md hover:bg-[#3aa8a9] transition-all"
+                  <li key={index} className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-center">
+                    <div className="flex items-center">
+                      <span className="text-gray-500 mr-3">{index + 1}.</span>
+                      <span className="text-xl mr-3">🎵</span>
+                      <span className="text-gray-700">{audio.name}</span>
+                      <span
+                        className={`ml-3 px-3 py-1 rounded-full text-sm font-medium ${
+                          audio.status === "Pendiente"
+                            ? "bg-gray-200 text-gray-700"
+                            : audio.status === "Procesando"
+                            ? "bg-yellow-200 text-yellow-800"
+                            : audio.status === "Completado"
+                            ? "bg-green-200 text-green-800"
+                            : "bg-red-200 text-red-800"
+                        }`}
                       >
-                        Subir a Drive
-                      </button>
-                    )}
-
-                    {/* Link al audio en Drive */}
-                    {audio.status === "Completado" && audio.audioDriveLink && (
+                        {audio.status}
+                      </span>
+                    </div>
+  
+                    {/* Botón para descargar transcripción */}
+                    {audio.status === "Completado" && audio.transcriptLink && (
                       <a
-                        href={audio.audioDriveLink}
+                        href={audio.transcriptLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-2 sm:mt-0 px-4 py-2 text-sm bg-blue-600 text-white rounded-full shadow-md hover:bg-blue-700 transition-all"
+                        className="mt-2 sm:mt-0 px-4 py-2 bg-[#47CACC] text-white rounded-md shadow-md hover:bg-[#3aa8a9] transition-all"
                       >
-                        Ver en Drive
+                        📥 Descargar TXT
                       </a>
                     )}
                   </li>
