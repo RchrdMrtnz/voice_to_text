@@ -1,6 +1,6 @@
+// app/api/upload-audio/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
-import { Readable } from "stream";
 
 const auth = new google.auth.GoogleAuth({
   credentials: {
@@ -12,56 +12,35 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: "v3", auth });
 
-const ALLOWED_MIME_TYPES = [
-  'audio/mpeg', 'audio/wav', 'audio/mp4', 
-  'audio/ogg', 'audio/flac', 'audio/x-m4a'
-];
-
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
+    const { fileName, fileSize, fileType } = await req.json();
 
-    if (!file) {
-      return NextResponse.json({ error: "Archivo requerido" }, { status: 400 });
-    }
-
-    // Validar tipo MIME
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      return NextResponse.json(
-        { error: `Formato no soportado: ${file.type}` }, 
-        { status: 400 }
-      );
-    }
-
-    // Convertir a stream
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const readableStream = new Readable();
-    readableStream.push(buffer);
-    readableStream.push(null);
-
-    // Subir a Drive
-    const response = await drive.files.create({
+    // Crear sesión de subida resumible
+    const res = await drive.files.create({
       requestBody: {
-        name: file.name,
-        mimeType: file.type,
+        name: fileName,
         parents: [process.env.DRIVE_FOLDER_ID!],
       },
-      media: {
-        mimeType: file.type,
-        body: readableStream,
-      },
+      media: { mimeType: fileType },
+      fields: 'id'
+    }, {
+      params: { uploadType: 'resumable' },
+      headers: {
+        'X-Upload-Content-Type': fileType,
+        'X-Upload-Content-Length': fileSize,
+        'Content-Type': 'application/json; charset=UTF-8'
+      }
     });
 
     return NextResponse.json({
-      audioDriveLink: `https://drive.google.com/file/d/${response.data.id}/view`,
-      fileName: file.name
+      uploadUrl: res.headers.location,
+      fileId: res.data.id
     });
 
   } catch (error) {
-    console.error("Error:", error);
     return NextResponse.json(
-      { error: "Error al subir el archivo" },
+      { error: "Error al generar URL de subida" },
       { status: 500 }
     );
   }
