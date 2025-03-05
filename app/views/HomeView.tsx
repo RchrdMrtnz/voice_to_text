@@ -251,15 +251,19 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size
+        fileType: file.type
       })
     });
 
-    const { uploadUrl, fileId } = await initRes.json();
+    const { uploadUrl } = await initRes.json();
+    
+    // Validar URL
+    if (!uploadUrl.startsWith('https://')) {
+      throw new Error("URL de subida inválida");
+    }
 
-    // 2. Subir en chunks de 5MB
-    const CHUNK_SIZE = 5 * 1024 * 1024;
+    // 2. Subir en chunks
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
     let uploaded = 0;
 
     while (uploaded < file.size) {
@@ -278,14 +282,12 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
             body: chunk
           });
 
-          if (res.status === 308) { // Continuar subida
-            const range = res.headers.get("Range");
-            if (range) uploaded = parseInt(range.split("-")[1]) + 1;
+          if (res.status === 308) {
+            const rangeHeader = res.headers.get('Range');
+            if (rangeHeader) uploaded = parseInt(rangeHeader.split('-')[1]) + 1;
             continue;
           }
 
-          if (!res.ok) throw new Error("Error en chunk");
-          
           uploaded += chunk.size;
           const progress = Math.round((uploaded / file.size) * 100);
           
@@ -301,7 +303,8 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
       }
     }
 
-    // 3. Marcar como completado
+    // 3. Obtener enlace final
+    const fileId = uploadUrl.split('/').pop()?.split('?')[0];
     setUploadedAudios(prev => prev.map(a => 
       a.name === fileItem.name ? { 
         ...a, 
@@ -316,7 +319,6 @@ const uploadAudioToDrive = async (fileItem: UploadedAudio) => {
     ));
   }
 };
-
   // ---------------------------------
   //   CONVERTIR A WAV (opcional)
   // ---------------------------------

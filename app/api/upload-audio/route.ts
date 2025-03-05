@@ -1,4 +1,3 @@
-// app/api/upload-audio/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 
@@ -14,7 +13,7 @@ const drive = google.drive({ version: "v3", auth });
 
 export async function POST(req: NextRequest) {
   try {
-    const { fileName, fileSize, fileType } = await req.json();
+    const { fileName, fileType } = await req.json();
 
     // Crear sesión de subida resumible
     const res = await drive.files.create({
@@ -23,22 +22,26 @@ export async function POST(req: NextRequest) {
         parents: [process.env.DRIVE_FOLDER_ID!],
       },
       media: { mimeType: fileType },
-      fields: 'id'
     }, {
       params: { uploadType: 'resumable' },
       headers: {
         'X-Upload-Content-Type': fileType,
-        'X-Upload-Content-Length': fileSize,
         'Content-Type': 'application/json; charset=UTF-8'
       }
     });
 
-    return NextResponse.json({
-      uploadUrl: res.headers.location,
-      fileId: res.data.id
-    });
+    // Obtener URL de subida desde headers
+    const uploadUrl = res.headers['location'];
+    
+    if (!uploadUrl) {
+      console.error('Headers de respuesta:', res.headers);
+      throw new Error("No se recibió URL de subida de Google Drive");
+    }
+
+    return NextResponse.json({ uploadUrl });
 
   } catch (error) {
+    console.error("Error en API:", error);
     return NextResponse.json(
       { error: "Error al generar URL de subida" },
       { status: 500 }
