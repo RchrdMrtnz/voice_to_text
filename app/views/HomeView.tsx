@@ -251,7 +251,7 @@ export default function MicrophoneComponent() {
       );
   
       // 1️⃣ Solicitar la URL de subida
-      const initRes = await fetch("/api/upload-file/route", {
+      const initRes = await fetch("/api/upload-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
