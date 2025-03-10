@@ -66,34 +66,76 @@ export default function MicrophoneComponent() {
     setProcessingMessage("🎙️ Grabando audio...");
     setRecordingDuration(0);
     toast.success("Grabación iniciada");
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-    mediaRecorderRef.current = mediaRecorder;
-    audioChunksRef.current = [];
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        audioChunksRef.current.push(event.data);
-      }
-    };
-
-    mediaRecorder.onstop = async () => {
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-      const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-      const fileName = `Record-${Date.now()}.webm`;
-      await uploadAudio(audioBlob, fileName);
-    };
-
-    mediaRecorder.start(1000); // Enviar un chunk cada 1 segundo
-    recordingTimerRef.current = setInterval(() => {
-      setRecordingDuration((prev) => prev + 1);
-    }, 1000);
+  
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+  
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+  
+      mediaRecorder.onstop = async () => {
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+        }
+      
+        // Cerrar el stream de audio
+        stream.getTracks().forEach((track) => track.stop());
+      
+        // Verificar si hay datos grabados
+        if (audioChunksRef.current.length === 0) {
+          console.error("No se grabó ningún audio.");
+          toast.error("No se grabó ningún audio. Intenta de nuevo.");
+          return;
+        }
+      
+        // Crear el Blob y el archivo
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        console.log("Blob grabado:", audioBlob);
+      
+        const fileName = `Record-${Date.now()}.webm`;
+        const audioFile = new File([audioBlob], fileName, { type: "audio/webm" });
+        console.log("Archivo creado:", audioFile);
+      
+        // Agregar el archivo a la lista de audios subidos con estado "Pendiente"
+        const newAudio: UploadedAudio = {
+          name: fileName,
+          status: "Pendiente",
+        };
+        setUploadedAudios((prev) => [...prev, newAudio]);
+      
+        // Subir el archivo
+        await uploadAudio(audioFile, fileName);
+  
+        // Cerrar el stream de audio
+        stream.getTracks().forEach((track) => track.stop());
+  
+        // Verificar si hay datos grabados
+        if (audioChunksRef.current.length === 0) {
+          console.error("No se grabó ningún audio.");
+          toast.error("No se grabó ningún audio. Intenta de nuevo.");
+          return;
+        }
+        // Subir el archivo
+        await uploadAudio(audioFile, fileName);
+      };
+  
+      mediaRecorder.start(); // Iniciar la grabación sin chunks
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error("Error al iniciar la grabación:", error);
+      toast.error("Error al iniciar la grabación. Intenta de nuevo.");
+      setIsRecording(false);
+    }
   };
-
-  // Función para detener la grabación
+  
   const stopRecording = () => {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
@@ -118,73 +160,69 @@ export default function MicrophoneComponent() {
     }
   };
 
-  // Función para subir un archivo de audio al backend usando axios
-  const uploadAudio = async (audioBlob: Blob, fileName: string) => {
-    const controller = new AbortController();
-    const signal = controller.signal;
-
-    const audioFile = new File([audioBlob], fileName, { type: "audio/webm" });
-
-    if (!audioFile) {
-      console.error("🚨 Error: El archivo es nulo o indefinido.");
-      toast.error("Error al subir el archivo");
-      return;
-    }
-
+  const uploadAudio = async (audioFile: File, fileName: string) => {
     const formData = new FormData();
     formData.append("file", audioFile);
-
+  
     try {
-      // Subir el archivo con keepalive y control de conexión
+      console.log("📤 Subiendo archivo...");
+      setProcessingMessage("Subiendo archivo...");
+  
+      // Subir el archivo al backend
       const uploadResponse = await fetch(`${backendUrl}/upload`, {
         method: "POST",
         body: formData,
-        signal, // Evita que el navegador cancele la solicitud
-        keepalive: true, // Mantiene la conexión abierta
       });
-
+  
       if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error("🚨 Error en la respuesta del servidor:", errorText);
         throw new Error(`Error al subir el archivo: ${uploadResponse.statusText}`);
       }
-
+  
       const uploadData = await uploadResponse.json();
-
+      console.log("✅ Archivo subido con éxito:", uploadData);
+  
       if (!uploadData.message || uploadData.message !== "Archivo subido con éxito") {
         throw new Error("No se pudo subir el archivo.");
       }
-
+  
       // Actualizar el estado a "Procesando"
       setUploadedAudios((prev) =>
         prev.map((audio) =>
           audio.name === fileName ? { ...audio, status: "Procesando" } : audio
         )
       );
-
+  
       await new Promise((resolve) => setTimeout(resolve, 500)); // Pequeño retraso para mostrar "Procesando"
-
+  
       // Iniciar la transcripción
       const segmentDuration = 60;
       const fileNameKey = uploadData.file_info.Key.split("/").pop();
-
+  
+      console.log("🔍 Iniciando transcripción...");
+      setProcessingMessage("Transcribiendo audio...");
+  
       const transcribeResponse = await fetch(
         `${backendUrl}/transcribe/${fileNameKey}?segment_duration=${segmentDuration}`,
         {
           method: "POST",
-          signal, // Evita cierre prematuro
-          keepalive: true,
         }
       );
-
+  
       if (!transcribeResponse.ok) {
+        const errorText = await transcribeResponse.text();
+        console.error("🚨 Error en la respuesta de transcripción:", errorText);
         throw new Error(`Error al obtener la transcripción: ${transcribeResponse.statusText}`);
       }
-
+  
       const transcribeData = await transcribeResponse.json();
-
+      console.log("✅ Transcripción completada:", transcribeData);
+  
       if (!transcribeData.file_details || !transcribeData.file_details.transcription_file_url) {
         throw new Error("No se pudo obtener el enlace del archivo de transcripción.");
       }
-
+  
       // Actualizar el estado a "Completado"
       setUploadedAudios((prev) =>
         prev.map((audio) =>
@@ -198,7 +236,7 @@ export default function MicrophoneComponent() {
             : audio
         )
       );
-
+  
       toast.success("Audio subido y transcrito correctamente");
     } catch (error) {
       console.error("🚨 Error al subir audio o obtener la transcripción:", error);
@@ -217,7 +255,7 @@ export default function MicrophoneComponent() {
     <div className="flex flex-col items-center justify-center min-h-screen w-full py-20 bg-[#70D7D9]">
       {/* MODAL DE CONFIRMACIÓN */}
       {showExitModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-10">
           <div className="bg-white px-8 py-14 rounded-xl shadow-xl text-center max-w-md w-full flex flex-col items-center">
             <h2 className="text-2xl font-bold text-red-600 mb-4">⚠️ Advertencia</h2>
             <p className="text-gray-700 text-lg leading-relaxed mb-4">
@@ -252,7 +290,7 @@ export default function MicrophoneComponent() {
         <div className="px-8 py-12 flex-grow">
           {/* Grabación de audio */}
           <div className="text-center">
-            <p className="text-xl font-medium text-gray-700 mb-8">🎤 Graba un audio</p>
+            <p className="text-xl font-extrabold text-gray-700 mb-8">🎤 Graba un audio</p>
             <div className="flex justify-center">
               {isRecording ? (
                 <button
@@ -277,9 +315,17 @@ export default function MicrophoneComponent() {
             )}
           </div>
 
+          <div className="mt-8 text-center flex flex-col justify-center items-center">
+            <div className="relative">
+              {/* Texto "- o -" con estilo y líneas usando pseudoelementos */}
+              <div className="relative inline-flex items-center justify-center w-16 h-16  text-2xl font-extrabold text-gray-700  transition-transform duration-200 before:absolute before:top-1/2 before:left-[-33%] before:w-6/12 before:h-px before:bg-black before:transform before:-translate-y-1/2 after:absolute after:top-1/2 after:right-[-33%] after:w-6/12 after:h-px after:bg-black after:transform after:-translate-y-1/2">
+                O 
+              </div>
+            </div>
+          </div>
           {/* Subida de archivos */}
           <div className="mt-8 text-center flex flex-col justify-center items-center">
-            <p className="text-xl font-medium text-gray-700 mb-8">📂 Sube audios desde tu dispositivo</p>
+            <p className="text-xl font-extrabold text-gray-700 mb-8">📂 Sube audios desde tu dispositivo</p>
             <label className="flex flex-col items-center justify-center w-80 h-32 border-2 border-dashed border-[#47CACC] rounded-lg cursor-pointer hover:bg-gray-50 transition-all p-4">
               <span className="text-4xl text-[#47CACC]">📤</span>
               <span className="text-gray-600 text-sm mt-3">Haz clic aquí o arrastra tus archivos</span>
