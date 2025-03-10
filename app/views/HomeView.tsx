@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import axios from "axios";
 import toast from 'react-hot-toast';
 
 interface UploadedAudio {
@@ -16,9 +17,11 @@ export default function MicrophoneComponent() {
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
   const [showExitModal, setShowExitModal] = useState(false);
   const [exitAction, setExitAction] = useState<(() => void) | null>(null);
-  
+  const [recordingDuration, setRecordingDuration] = useState(0);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // URL del backend
   const backendUrl = "/api";
@@ -48,21 +51,20 @@ export default function MicrophoneComponent() {
     };
   }, []);
 
-  
-  
   const handleExit = () => {
     if (exitAction) {
       exitAction(); // Ejecuta la acción de salida
       setShowExitModal(false);
     }
   };
-  
+
   const cancelExit = () => setShowExitModal(false);
-  
+
   // Función para iniciar la grabación
   const startRecording = async () => {
     setIsRecording(true);
     setProcessingMessage("🎙️ Grabando audio...");
+    setRecordingDuration(0);
     toast.success("Grabación iniciada");
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -77,12 +79,18 @@ export default function MicrophoneComponent() {
     };
 
     mediaRecorder.onstop = async () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
       const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
       const fileName = `Record-${Date.now()}.webm`;
       await uploadAudio(audioBlob, fileName);
     };
 
     mediaRecorder.start(1000); // Enviar un chunk cada 1 segundo
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingDuration((prev) => prev + 1);
+    }, 1000);
   };
 
   // Función para detener la grabación
@@ -110,70 +118,73 @@ export default function MicrophoneComponent() {
     }
   };
 
-  // Función para subir un archivo de audio al backend
+  // Función para subir un archivo de audio al backend usando axios
   const uploadAudio = async (audioBlob: Blob, fileName: string) => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+
     const audioFile = new File([audioBlob], fileName, { type: "audio/webm" });
-  
+
     if (!audioFile) {
       console.error("🚨 Error: El archivo es nulo o indefinido.");
       toast.error("Error al subir el archivo");
       return;
     }
-  
+
     const formData = new FormData();
     formData.append("file", audioFile);
-  
+
     try {
-      // Subir el archivo
+      // Subir el archivo con keepalive y control de conexión
       const uploadResponse = await fetch(`${backendUrl}/upload`, {
         method: "POST",
         body: formData,
+        signal, // Evita que el navegador cancele la solicitud
+        keepalive: true, // Mantiene la conexión abierta
       });
-  
+
       if (!uploadResponse.ok) {
         throw new Error(`Error al subir el archivo: ${uploadResponse.statusText}`);
       }
-  
+
       const uploadData = await uploadResponse.json();
-  
+
       if (!uploadData.message || uploadData.message !== "Archivo subido con éxito") {
         throw new Error("No se pudo subir el archivo.");
       }
-  
+
       // Actualizar el estado a "Procesando"
       setUploadedAudios((prev) =>
         prev.map((audio) =>
-          audio.name === fileName
-            ? {
-                ...audio,
-                status: "Procesando",
-              }
-            : audio
+          audio.name === fileName ? { ...audio, status: "Procesando" } : audio
         )
       );
-  
-      // Forzar un pequeño retraso para asegurar que el estado "Procesando" se muestre
-      await new Promise((resolve) => setTimeout(resolve, 500)); // 500ms de retraso
-  
+
+      await new Promise((resolve) => setTimeout(resolve, 500)); // Pequeño retraso para mostrar "Procesando"
+
       // Iniciar la transcripción
       const segmentDuration = 60;
-      const fileNameKey = uploadData.file_info.Key.split('/').pop();
-  
+      const fileNameKey = uploadData.file_info.Key.split("/").pop();
+
       const transcribeResponse = await fetch(
         `${backendUrl}/transcribe/${fileNameKey}?segment_duration=${segmentDuration}`,
-        { method: "POST" }
+        {
+          method: "POST",
+          signal, // Evita cierre prematuro
+          keepalive: true,
+        }
       );
-  
+
       if (!transcribeResponse.ok) {
         throw new Error(`Error al obtener la transcripción: ${transcribeResponse.statusText}`);
       }
-  
+
       const transcribeData = await transcribeResponse.json();
-  
+
       if (!transcribeData.file_details || !transcribeData.file_details.transcription_file_url) {
         throw new Error("No se pudo obtener el enlace del archivo de transcripción.");
       }
-  
+
       // Actualizar el estado a "Completado"
       setUploadedAudios((prev) =>
         prev.map((audio) =>
@@ -181,24 +192,19 @@ export default function MicrophoneComponent() {
             ? {
                 ...audio,
                 status: "Completado",
-                audioLink: uploadData.file_info.URL,
+                audioLink: transcribeData.file_details.audio_url,
                 transcriptLink: transcribeData.file_details.transcription_file_url,
               }
             : audio
         )
       );
-  
+
       toast.success("Audio subido y transcrito correctamente");
     } catch (error) {
       console.error("🚨 Error al subir audio o obtener la transcripción:", error);
       setUploadedAudios((prev) =>
         prev.map((audio) =>
-          audio.name === fileName
-            ? {
-                ...audio,
-                status: "Error al procesar",
-              }
-            : audio
+          audio.name === fileName ? { ...audio, status: "Error al procesar" } : audio
         )
       );
       toast.error("Error al procesar el audio");
@@ -206,11 +212,11 @@ export default function MicrophoneComponent() {
       setProcessingMessage(null);
     }
   };
-  
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full py-20 bg-[#70D7D9]">
-       {/* MODAL DE CONFIRMACIÓN */}
-        {showExitModal && (
+      {/* MODAL DE CONFIRMACIÓN */}
+      {showExitModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
           <div className="bg-white px-8 py-14 rounded-xl shadow-xl text-center max-w-md w-full flex flex-col items-center">
             <h2 className="text-2xl font-bold text-red-600 mb-4">⚠️ Advertencia</h2>
@@ -264,7 +270,11 @@ export default function MicrophoneComponent() {
                 </button>
               )}
             </div>
-            {isRecording && <p className="text-red-500 mt-2">🔴 Grabando...</p>}
+            {isRecording && (
+              <p className="text-red-500 mt-2">
+                🔴 Grabando... {recordingDuration}s
+              </p>
+            )}
           </div>
 
           {/* Subida de archivos */}
