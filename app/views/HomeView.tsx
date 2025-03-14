@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import axios from "axios";
+import { uploadAudio } from '../api/ApiService'; // Importa la función de la API
 import toast from 'react-hot-toast';
 
 interface UploadedAudio {
@@ -22,9 +22,6 @@ export default function MicrophoneComponent() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // URL del backend
-  const backendUrl = "/api";
 
   useEffect(() => {
     // Detectar intento de salir en móviles y escritorio
@@ -66,65 +63,53 @@ export default function MicrophoneComponent() {
     setProcessingMessage("🎙️ Grabando audio...");
     setRecordingDuration(0);
     toast.success("Grabación iniciada");
-  
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-  
+
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
-  
+
       mediaRecorder.onstop = async () => {
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
         }
-      
+
         // Cerrar el stream de audio
         stream.getTracks().forEach((track) => track.stop());
-      
+
         // Verificar si hay datos grabados
         if (audioChunksRef.current.length === 0) {
           console.error("No se grabó ningún audio.");
           toast.error("No se grabó ningún audio. Intenta de nuevo.");
           return;
         }
-      
+
         // Crear el Blob y el archivo
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         console.log("Blob grabado:", audioBlob);
-      
+
         const fileName = `Record-${Date.now()}.webm`;
         const audioFile = new File([audioBlob], fileName, { type: "audio/webm" });
         console.log("Archivo creado:", audioFile);
-      
+
         // Agregar el archivo a la lista de audios subidos con estado "Pendiente"
         const newAudio: UploadedAudio = {
           name: fileName,
           status: "Pendiente",
         };
         setUploadedAudios((prev) => [...prev, newAudio]);
-      
+
         // Subir el archivo
-        await uploadAudio(audioFile, fileName);
-  
-        // Cerrar el stream de audio
-        stream.getTracks().forEach((track) => track.stop());
-  
-        // Verificar si hay datos grabados
-        if (audioChunksRef.current.length === 0) {
-          console.error("No se grabó ningún audio.");
-          toast.error("No se grabó ningún audio. Intenta de nuevo.");
-          return;
-        }
-        // Subir el archivo
-        await uploadAudio(audioFile, fileName);
+        await uploadAudio(audioFile, fileName, setUploadedAudios, setProcessingMessage);
       };
-  
+
       mediaRecorder.start(); // Iniciar la grabación sin chunks
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => prev + 1);
@@ -135,7 +120,7 @@ export default function MicrophoneComponent() {
       setIsRecording(false);
     }
   };
-  
+
   const stopRecording = () => {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
@@ -155,99 +140,8 @@ export default function MicrophoneComponent() {
         };
 
         setUploadedAudios((prev) => [...prev, newAudio]);
-        await uploadAudio(file, file.name);
+        await uploadAudio(file, file.name, setUploadedAudios, setProcessingMessage);
       });
-    }
-  };
-
-  const uploadAudio = async (audioFile: File, fileName: string) => {
-    const formData = new FormData();
-    formData.append("file", audioFile);
-  
-    try {
-      console.log("📤 Subiendo archivo...");
-      setProcessingMessage("Subiendo archivo...");
-  
-      // Subir el archivo al backend
-      const uploadResponse = await fetch(`${backendUrl}/upload`, {
-        method: "POST",
-        body: formData,
-      });
-  
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        console.error("🚨 Error en la respuesta del servidor:", errorText);
-        throw new Error(`Error al subir el archivo: ${uploadResponse.statusText}`);
-      }
-  
-      const uploadData = await uploadResponse.json();
-      console.log("✅ Archivo subido con éxito:", uploadData);
-  
-      if (!uploadData.message || uploadData.message !== "Archivo subido con éxito") {
-        throw new Error("No se pudo subir el archivo.");
-      }
-  
-      // Actualizar el estado a "Procesando"
-      setUploadedAudios((prev) =>
-        prev.map((audio) =>
-          audio.name === fileName ? { ...audio, status: "Procesando" } : audio
-        )
-      );
-  
-      await new Promise((resolve) => setTimeout(resolve, 500)); // Pequeño retraso para mostrar "Procesando"
-  
-      // Iniciar la transcripción
-      const segmentDuration = 60;
-      const fileNameKey = uploadData.file_info.Key.split("/").pop();
-  
-      console.log("🔍 Iniciando transcripción...");
-      setProcessingMessage("Transcribiendo audio...");
-  
-      const transcribeResponse = await fetch(
-        `${backendUrl}/transcribe/${fileNameKey}?segment_duration=${segmentDuration}`,
-        {
-          method: "POST",
-        }
-      );
-  
-      if (!transcribeResponse.ok) {
-        const errorText = await transcribeResponse.text();
-        console.error("🚨 Error en la respuesta de transcripción:", errorText);
-        throw new Error(`Error al obtener la transcripción: ${transcribeResponse.statusText}`);
-      }
-  
-      const transcribeData = await transcribeResponse.json();
-      console.log("✅ Transcripción completada:", transcribeData);
-  
-      if (!transcribeData.file_details || !transcribeData.file_details.transcription_file_url) {
-        throw new Error("No se pudo obtener el enlace del archivo de transcripción.");
-      }
-  
-      // Actualizar el estado a "Completado"
-      setUploadedAudios((prev) =>
-        prev.map((audio) =>
-          audio.name === fileName
-            ? {
-                ...audio,
-                status: "Completado",
-                audioLink: transcribeData.file_details.audio_url,
-                transcriptLink: transcribeData.file_details.transcription_file_url,
-              }
-            : audio
-        )
-      );
-  
-      toast.success("Audio subido y transcrito correctamente");
-    } catch (error) {
-      console.error("🚨 Error al subir audio o obtener la transcripción:", error);
-      setUploadedAudios((prev) =>
-        prev.map((audio) =>
-          audio.name === fileName ? { ...audio, status: "Error al procesar" } : audio
-        )
-      );
-      toast.error("Error al procesar el audio");
-    } finally {
-      setProcessingMessage(null);
     }
   };
 
