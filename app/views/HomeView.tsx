@@ -108,57 +108,58 @@ export default function MicrophoneComponent() {
 
   // Función para iniciar la grabación
   const startRecording = async () => {
-    setIsRecording(true);
-    setProcessingMessage("🎙️ Grabando audio...");
-    setRecordingDuration(0);
-    toast.success("Grabación iniciada");
-
     try {
+      // Solicitar permisos antes de iniciar la grabación
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setIsRecording(true);
+      setProcessingMessage("🎙️ Grabando audio...");
+      setRecordingDuration(0);
+      toast.success("Grabación iniciada");
+  
       const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-
+  
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
-
+  
       mediaRecorder.onstop = async () => {
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
         }
-
+  
         // Cerrar el stream de audio
         stream.getTracks().forEach((track) => track.stop());
-
+  
         // Verificar si hay datos grabados
         if (audioChunksRef.current.length === 0) {
           console.error("No se grabó ningún audio.");
           toast.error("No se grabó ningún audio. Intenta de nuevo.");
           return;
         }
-
+  
         // Crear el Blob y el archivo
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         console.log("Blob grabado:", audioBlob);
-
+  
         const fileName = `Record-${Date.now()}.webm`;
         const audioFile = new File([audioBlob], fileName, { type: "audio/webm" });
         console.log("Archivo creado:", audioFile);
-
+  
         // Agregar el archivo a la lista de audios subidos con estado "Pendiente"
         const newAudio: UploadedAudio = {
           name: fileName,
           status: "Pendiente",
         };
         setUploadedAudios((prev) => [...prev, newAudio]);
-
+  
         // Subir el archivo
         await uploadAudio(audioFile, fileName, setUploadedAudios, setProcessingMessage);
       };
-
+  
       mediaRecorder.start(); // Iniciar la grabación sin chunks
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => prev + 1);
@@ -169,7 +170,6 @@ export default function MicrophoneComponent() {
       setIsRecording(false);
     }
   };
-
   const stopRecording = () => {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
