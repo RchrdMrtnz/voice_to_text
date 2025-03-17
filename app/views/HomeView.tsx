@@ -108,24 +108,28 @@ export default function MicrophoneComponent() {
 
   // Función para iniciar la grabación
   const startRecording = async () => {
-    try {
-      // Solicitar permisos antes de iniciar la grabación
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setIsRecording(true);
-      setProcessingMessage("🎙️ Grabando audio...");
-      setRecordingDuration(0);
-      toast.success("Grabación iniciada");
+    setIsRecording(true);
+    setProcessingMessage("🎙️ Grabando audio");
+    setRecordingDuration(0);
+    toast.success("Grabación iniciada");
   
+    try {
+      // Solicitar acceso al micrófono
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  
+      // Inicializar el MediaRecorder con el formato "audio/webm"
       const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
   
+      // Manejar los datos disponibles durante la grabación
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
   
+      // Manejar el evento cuando la grabación se detiene
       mediaRecorder.onstop = async () => {
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
@@ -160,7 +164,11 @@ export default function MicrophoneComponent() {
         await uploadAudio(audioFile, fileName, setUploadedAudios, setProcessingMessage);
       };
   
-      mediaRecorder.start(); // Iniciar la grabación sin chunks
+      // Iniciar la grabación
+      mediaRecorder.start();
+      console.log("Grabación iniciada");
+  
+      // Iniciar el temporizador para la duración de la grabación
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => prev + 1);
       }, 1000);
@@ -168,11 +176,12 @@ export default function MicrophoneComponent() {
       console.error("Error al iniciar la grabación:", error);
       toast.error("Error al iniciar la grabación. Intenta de nuevo.");
       setIsRecording(false);
+      setProcessingMessage(null); // Limpiar el mensaje de procesamiento
     }
   };
   const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop(); // Detener la grabación
     }
     setIsRecording(false);
     toast.success("Grabación detenida");

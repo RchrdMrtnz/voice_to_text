@@ -1,13 +1,13 @@
-import './globals.css';
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import { Toaster } from 'react-hot-toast'; // Importa Toaster
+import "./globals.css";
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import { Toaster } from "react-hot-toast"; // Importa Toaster
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Transcripción de Audio',
-  description: 'Transcribe un audio con Whisper',
+  title: "Transcripción de Audio",
+  description: "Transcribe un audio con Whisper",
 };
 
 export default function RootLayout({
