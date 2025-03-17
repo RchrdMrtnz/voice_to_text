@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { uploadAudio } from '../api/ApiService'; // Importa la función de la API
+import { uploadAudio, getFilesFromS3 } from '../api/ApiService'; // Importa la función de la API
 import toast from 'react-hot-toast';
 
 interface UploadedAudio {
@@ -11,6 +11,14 @@ interface UploadedAudio {
   audioLink?: string;
 }
 
+interface S3File {
+  Key: string;
+  URL: string;
+  Size: number;
+  LastModified: string;
+  ContentType: string;
+}
+
 export default function MicrophoneComponent() {
   const [isRecording, setIsRecording] = useState(false);
   const [uploadedAudios, setUploadedAudios] = useState<UploadedAudio[]>([]);
@@ -18,10 +26,51 @@ export default function MicrophoneComponent() {
   const [showExitModal, setShowExitModal] = useState(false);
   const [exitAction, setExitAction] = useState<(() => void) | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
-
+  const [s3Files, setS3Files] = useState<S3File[]>([]); // Archivos totales en S3
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [groupedFiles, setGroupedFiles] = useState<
+  Record<string, { audio: S3File | null; transcript: S3File | null }>
+>({});
+  // Obtener los archivos de S3 al cargar la página
+  useEffect(() => {
+    const fetchFiles = async () => {
+      try {
+        const files = await getFilesFromS3();
+        console.log("Archivos de S3:", files); // Verifica los archivos
+        setS3Files(files);
+  
+        // Agrupa los archivos
+        const groupedFiles = files.reduce((acc: Record<string, { audio: S3File | null; transcript: S3File | null }>, file) => {
+          const fileName = file.Key.split("/").pop() || ""; // Obtener el nombre completo del archivo
+          const fileId = fileName.split("_")[0]; // Extraer el ID común (antes del primer "_")
+        
+          if (!acc[fileId]) {
+            acc[fileId] = { audio: null, transcript: null }; // Inicializar el grupo
+          }
+        
+          // Identificar si es un archivo de audio o de texto
+          if (fileName.includes("_audio") || fileName.endsWith(".wav") || fileName.endsWith(".ogg")) {
+            acc[fileId].audio = file; // Es un archivo de audio
+          } else if (fileName.includes("_transcript") || fileName.endsWith(".txt")) {
+            acc[fileId].transcript = file; // Es un archivo de texto
+          }
+        
+          return acc;
+        }, {} as Record<string, { audio: S3File | null; transcript: S3File | null }>);
+  
+        console.log("Archivos agrupados:", groupedFiles); // Verifica la agrupación
+        setGroupedFiles(groupedFiles);
+      } catch (error) {
+        console.error("🚨 Error al obtener los archivos de S3:", error);
+        toast.error("Error al obtener los archivos de S3. Intenta de nuevo.");
+      }
+    };
+  
+    fetchFiles();
+  }, []);
+
 
   useEffect(() => {
     // Detectar intento de salir en móviles y escritorio
@@ -130,21 +179,33 @@ export default function MicrophoneComponent() {
   };
 
   // Función para manejar la subida de archivos
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       const files = Array.from(event.target.files);
+      
       files.forEach(async (file) => {
-        const newAudio: UploadedAudio = {
-          name: file.name,
-          status: "Pendiente",
-        };
-
-        setUploadedAudios((prev) => [...prev, newAudio]);
-        await uploadAudio(file, file.name, setUploadedAudios, setProcessingMessage);
+        // Generar el nombre único del archivo antes de enviarlo a `uploadAudio`
+        const uniqueId = Date.now(); // Timestamp único
+        const uniqueFileName = `${uniqueId}_${file.name}`;
+  
+        // Evitar subir el mismo archivo dos veces
+        setUploadedAudios((prev) => {
+          if (prev.some(audio => audio.name === uniqueFileName)) {
+            console.warn(`⚠️ Archivo duplicado detectado: ${uniqueFileName}, no se subirá otra vez.`);
+            return prev;
+          }
+          return [...prev, { name: uniqueFileName, status: "Pendiente" }];
+        });
+  
+        // Subir archivo con el nombre único generado aquí
+        await uploadAudio(file, uniqueFileName, setUploadedAudios, setProcessingMessage);
       });
     }
   };
-
+  
+  
+  
+  
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full py-20 bg-[#70D7D9]">
       {/* MODAL DE CONFIRMACIÓN */}
@@ -162,7 +223,7 @@ export default function MicrophoneComponent() {
               <button 
                 onClick={() => { setShowExitModal(false); window.location.reload(); }} 
                 className="bg-red-500 hover:bg-red-600 text-white font-semibold px-6 py-3 rounded w-full sm:w-auto transition-all">
-                Salir 😟
+                Salir
               </button>
               <button 
                 onClick={() => setShowExitModal(false)} 
@@ -196,9 +257,9 @@ export default function MicrophoneComponent() {
               ) : (
                 <button
                   onClick={startRecording}
-                  className="p-6 rounded-full bg-[#47CACC] text-white text-3xl shadow-md hover:bg-[#3aa8a9] transition-all"
+                  className="p-6 rounded-full bg-[#47CACC] text-white shadow-md hover:bg-[#3aa8a9] transition-all"
                 >
-                  🗣️
+                  <img src="https://test-api-bot.s3.us-east-1.amazonaws.com/microphone-solid+(1).svg" className="w-6 aspect-square" alt="Icono de microfono"></img>
                 </button>
               )}
             </div>
@@ -279,6 +340,65 @@ export default function MicrophoneComponent() {
               </ul>
             </div>
           )}
+          {/* Archivos totales en S3 */}
+          {Object.entries(groupedFiles).length > 0 && (
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">
+                📁 Archivos del Usuario
+              </h3>
+              <ul className="space-y-3">
+                {Object.entries(groupedFiles).map(([fileId, files], index) => (
+                  <li
+                    key={index}
+                    className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center"
+                  >
+                    {/* Información del archivo */}
+                    <div className="flex flex-col">
+                      <span className="text-gray-700 font-medium">
+                        {files.audio ? files.audio.Key.split("/").pop() : files.transcript?.Key.split("/").pop()}
+                      </span>
+                      {files.audio && (
+                        <span className="text-sm text-gray-500">
+                          Tamaño: {(files.audio.Size / 1024).toFixed(2)} KB
+                        </span>
+                      )}
+                      {files.audio && (
+                        <span className="text-sm text-gray-500">
+                          Última modificación: {new Date(files.audio.LastModified).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Botones de descarga */}
+                    <div className="mt-2 sm:mt-0 flex flex-wrap gap-2">
+                      {files.audio && (
+                        <a
+                          href={files.audio.URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all flex items-center"
+                        >
+                          🎧 Audio
+                        </a>
+                      )}
+
+                      {files.transcript && (
+                        <a
+                          href={files.transcript.URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all flex items-center"
+                        >
+                          📄 Transcripción
+                        </a>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
         </div>
       </div>
     </div>

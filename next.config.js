@@ -5,8 +5,8 @@ module.exports = {
   async rewrites() {
     return [
       {
-        source: "/api/:path*", // Todas las solicitudes que comiencen con /api
-        destination: `${process.env.NEXT_PUBLIC_API_URL}/:path*`, // Redirige al backend
+        source: "/api/:path*", 
+        destination: `${process.env.NEXT_PUBLIC_API_URL}/:path*`, 
       },
     ];
   },
