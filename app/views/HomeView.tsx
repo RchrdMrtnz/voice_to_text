@@ -4,8 +4,11 @@ import { useState, useEffect } from "react";
 import { uploadAudio, getFilesFromS3 } from '../api/ApiService';
 import toast from 'react-hot-toast';
 import ExitModal from './ExitModal';
-import AudioRecorder from './AudioRecorder'; // Importar el componente AudioRecorder
+import dynamic from "next/dynamic";
 
+const AudioRecorder = dynamic(() => import("./AudioRecorder"), {
+  ssr: false, // Desactiva la renderización en el servidor
+});
 interface UploadedAudio {
   name: string;
   status: "Pendiente" | "Procesando" | "Completado" | "Error al procesar";
