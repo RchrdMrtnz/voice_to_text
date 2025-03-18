@@ -174,7 +174,7 @@ export default function MicrophoneComponent() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen w-full py-20 bg-[#70D7D9]">
+    <div className="flex flex-col items-center justify-center min-h-screen w-full py-10 bg-[#70D7D9]">
       {/* Modal de confirmación */}
       <ExitModal
         show={showExitModal}
@@ -184,9 +184,9 @@ export default function MicrophoneComponent() {
           window.location.reload();
         }}
       />
-
+  
       {/* Contenedor principal */}
-      <main className="bg-white rounded-xl w-full max-w-3xl shadow-lg flex flex-col">
+      <main className="bg-white rounded-xl w-full max-w-3xl shadow-lg flex flex-col mx-4">
         {/* Header con logo */}
         <header className="w-full h-24 rounded-t-xl flex justify-center items-center bg-[#47CACC]">
           <img
@@ -195,12 +195,12 @@ export default function MicrophoneComponent() {
             alt="Logo de Procencia"
           />
         </header>
-
+  
         {/* Contenido principal */}
-        <section className="px-8 py-12 flex-grow">
+        <section className="px-4 sm:px-8 py-8 sm:py-12 flex-grow">
           {/* Usar el componente AudioRecorder */}
           <AudioRecorder onRecordingStop={handleRecordingStop} />
-
+  
           {/* Separador visual */}
           <div className="mt-8 text-center flex flex-col justify-center items-center">
             <div className="relative">
@@ -209,11 +209,11 @@ export default function MicrophoneComponent() {
               </div>
             </div>
           </div>
-
+  
           {/* Subida de archivos */}
           <article className="mt-8 text-center flex flex-col justify-center items-center">
             <h2 className="text-xl font-extrabold text-gray-700 mb-8">📂 Sube audios desde tu dispositivo</h2>
-            <label className="flex flex-col items-center justify-center w-80 h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 transition-all p-4">
+            <label className="flex flex-col items-center justify-center w-full sm:w-80 h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 transition-all p-4">
               <span className="text-4xl text-[#47CACC]">📤</span>
               <span className="text-gray-600 text-sm mt-3">Haz clic aquí o arrastra tus archivos</span>
               <input
@@ -226,7 +226,7 @@ export default function MicrophoneComponent() {
               />
             </label>
           </article>
-
+  
           {/* Notificación de procesamiento */}
           {processingMessage && (
             <div
@@ -236,7 +236,7 @@ export default function MicrophoneComponent() {
               {processingMessage}
             </div>
           )}
-
+  
           {/* Lista de audios subidos */}
           {uploadedAudios.length > 0 && (
             <article className="mt-8">
@@ -245,14 +245,14 @@ export default function MicrophoneComponent() {
                 {uploadedAudios.map((audio, index) => (
                   <li
                     key={index}
-                    className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-center"
+                    className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-center gap-4"
                   >
-                    <div className="flex items-center">
-                      <span className="text-gray-500 mr-3">{index + 1}.</span>
-                      <span className="text-xl mr-3">🎵</span>
-                      <span className="text-gray-700">{audio.name}</span>
+                    <div className="flex flex-col sm:flex-row items-center gap-2">
+                      <span className="text-gray-500">{index + 1}.</span>
+                      <span className="text-xl">🎵</span>
+                      <span className="text-gray-700 text-center sm:text-left text-ellipsis">{audio.name}</span>
                       <span
-                        className={`ml-3 px-3 py-1 rounded-full text-sm font-medium ${
+                        className={`px-3 py-1 rounded-full text-sm font-medium ${
                           audio.status === "Pendiente"
                             ? "bg-gray-200 text-gray-700"
                             : audio.status === "Procesando"
@@ -265,14 +265,14 @@ export default function MicrophoneComponent() {
                         {audio.status}
                       </span>
                     </div>
-
+  
                     {/* Botón para descargar transcripción */}
                     {audio.status === "Completado" && audio.transcriptLink && (
                       <a
                         href={audio.transcriptLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-2 sm:mt-0 px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all"
+                        className="w-full sm:w-auto px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
                       >
                         📥 Descargar TXT
                       </a>
@@ -282,62 +282,56 @@ export default function MicrophoneComponent() {
               </ul>
             </article>
           )}
-
+  
           {/* Archivos totales en S3 */}
-          {Object.entries(groupedFiles).length > 0 && (
-            <article className="mt-8">
-              <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📁 Archivos del Usuario</h3>
-              <ul className="space-y-3">
-                {Object.entries(groupedFiles).map(([fileId, files], index) => (
-                  <li
-                    key={index}
-                    className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center"
+          {Object.entries(groupedFiles).map(([fileId, files], index) => (
+            <li
+              key={index}
+              className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+            >
+              <div className="flex flex-col w-full sm:w-auto">
+                {/* Usar truncate para textos largos */}
+                <span className="text-gray-700 font-medium truncate">
+                  {files.audio ? files.audio.Key.split("/").pop() : files.transcript?.Key.split("/").pop()}
+                </span>
+                {files.audio && (
+                  <span className="text-sm text-gray-500">
+                    Tamaño: {(files.audio.Size / 1024).toFixed(2)} KB
+                  </span>
+                )}
+                {files.audio && (
+                  <span className="text-sm text-gray-500">
+                    Última modificación: {new Date(files.audio.LastModified).toLocaleString()}
+                  </span>
+                )}
+              </div>
+
+              {/* Botones de descarga */}
+              <div className="w-full sm:w-auto flex flex-wrap gap-2">
+                {files.audio && (
+                  <a
+                    href={files.audio.URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
                   >
-                    <div className="flex flex-col">
-                      <span className="text-gray-700 font-medium">
-                        {files.audio ? files.audio.Key.split("/").pop() : files.transcript?.Key.split("/").pop()}
-                      </span>
-                      {files.audio && (
-                        <span className="text-sm text-gray-500">
-                          Tamaño: {(files.audio.Size / 1024).toFixed(2)} KB
-                        </span>
-                      )}
-                      {files.audio && (
-                        <span className="text-sm text-gray-500">
-                          Última modificación: {new Date(files.audio.LastModified).toLocaleString()}
-                        </span>
-                      )}
-                    </div>
+                    🎧 Audio
+                  </a>
+                )}
 
-                    {/* Botones de descarga */}
-                    <div className="mt-2 sm:mt-0 flex flex-wrap gap-2">
-                      {files.audio && (
-                        <a
-                          href={files.audio.URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all flex items-center"
-                        >
-                          🎧 Audio
-                        </a>
-                      )}
-
-                      {files.transcript && (
-                        <a
-                          href={files.transcript.URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all flex items-center"
-                        >
-                          📄 Transcripción
-                        </a>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </article>
-          )}
+                {files.transcript && (
+                  <a
+                    href={files.transcript.URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
+                  >
+                    📄 Transcripción
+                  </a>
+                )}
+              </div>
+            </li>
+          ))}
         </section>
       </main>
     </div>
