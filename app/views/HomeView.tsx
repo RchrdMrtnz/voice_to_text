@@ -103,6 +103,7 @@ export default function MicrophoneComponent() {
   // Función para iniciar la grabación
   const startRecording = async () => {
     try {
+      if (typeof navigator === "undefined") return; // Evita que se ejecute en el servidor
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new RecordRTC(stream, {
         type: "audio",
@@ -111,7 +112,7 @@ export default function MicrophoneComponent() {
       });
 
       recorder.startRecording();
-      mediaRecorderRef.current = recorder; // Guardar referencia del grabador
+      mediaRecorderRef.current = recorder;
       setIsRecording(true);
 
       // Iniciar temporizador de grabación
@@ -120,7 +121,6 @@ export default function MicrophoneComponent() {
       }, 1000);
     } catch (error) {
       console.error("Error al grabar:", error);
-      // Aquí puedes mostrar un mensaje de error con toast o alert
     }
   };
 
