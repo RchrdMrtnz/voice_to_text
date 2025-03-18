@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, MutableRefObject  } from "react";
 import { uploadAudio, getFilesFromS3 } from '../api/ApiService';
 import toast from 'react-hot-toast';
 import ExitModal from './ExitModal'; // Importa el componente ExitModal
@@ -22,6 +22,7 @@ interface S3File {
 }
 
 export default function MicrophoneComponent() {
+  const mediaRecorderRef = useRef<RecordRTC | null>(null); 
   const [isRecording, setIsRecording] = useState(false);
   const [uploadedAudios, setUploadedAudios] = useState<UploadedAudio[]>([]);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
@@ -32,7 +33,6 @@ export default function MicrophoneComponent() {
     Record<string, { audio: S3File | null; transcript: S3File | null }>
   >({});
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -101,48 +101,47 @@ export default function MicrophoneComponent() {
   }, []);
 
   // Función para iniciar la grabación
-
-  const [isSafari, setIsSafari] = useState(false);
-
-  useEffect(() => {
-    setIsSafari(/^((?!chrome|android).)*safari/i.test(navigator.userAgent));
-  }, []);
-
-const startRecording = async () => {
-  if (typeof window === "undefined") return; // No ejecutar en el servidor
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new RecordRTC(stream, {
-      type: 'audio',
-      mimeType: isSafari ? 'audio/wav' : 'audio/webm',
-      recorderType: RecordRTC.StereoAudioRecorder,
-    });
-
-    recorder.startRecording();
-
-    setTimeout(() => {
-      recorder.stopRecording(() => {
-        const blob = recorder.getBlob();
-        const extension = isSafari ? 'wav' : 'webm';
-        const fileName = `Record-${Date.now()}.${extension}`;
-        const audioFile = new File([blob], fileName, { type: `audio/${extension}` });
-
-        console.log("Archivo grabado:", audioFile);
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new RecordRTC(stream, {
+        type: "audio",
+        mimeType: "audio/wav",
+        recorderType: RecordRTC.StereoAudioRecorder,
       });
-    }, 5000); // Grabar durante 5 segundos
-  } catch (error) {
-    console.error("Error al grabar:", error);
-  }
-};
+
+      recorder.startRecording();
+      mediaRecorderRef.current = recorder; // Guardar referencia del grabador
+      setIsRecording(true);
+
+      // Iniciar temporizador de grabación
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error("Error al grabar:", error);
+      // Aquí puedes mostrar un mensaje de error con toast o alert
+    }
+  };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      mediaRecorderRef.current.stop();
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stopRecording(() => {
+        // Obtener el blob de la grabación
+        const audioBlob = mediaRecorderRef.current?.getBlob();
+        if (audioBlob) {
+          const audioURL = URL.createObjectURL(audioBlob);
+          console.log("Audio disponible en:", audioURL);
+          toast.success("Grabación detenida");
+        }
+      });
     }
+  
     setIsRecording(false);
-    toast.success("Grabación detenida");
+    clearInterval(recordingTimerRef.current!);
+    setRecordingDuration(0);
   };
+  
 
   // Función para manejar la subida de archivos
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
