@@ -107,32 +107,34 @@ export default function MicrophoneComponent() {
   useEffect(() => {
     setIsSafari(/^((?!chrome|android).)*safari/i.test(navigator.userAgent));
   }, []);
-  
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new RecordRTC(stream, {
-        type: 'audio', // Grabar solo audio
-        mimeType: isSafari ? 'audio/wav' : 'audio/webm', // Usar wav en Safari, webm en otros navegadores
-        recorderType: RecordRTC.StereoAudioRecorder,
+
+const startRecording = async () => {
+  if (typeof window === "undefined") return; // No ejecutar en el servidor
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new RecordRTC(stream, {
+      type: 'audio',
+      mimeType: isSafari ? 'audio/wav' : 'audio/webm',
+      recorderType: RecordRTC.StereoAudioRecorder,
+    });
+
+    recorder.startRecording();
+
+    setTimeout(() => {
+      recorder.stopRecording(() => {
+        const blob = recorder.getBlob();
+        const extension = isSafari ? 'wav' : 'webm';
+        const fileName = `Record-${Date.now()}.${extension}`;
+        const audioFile = new File([blob], fileName, { type: `audio/${extension}` });
+
+        console.log("Archivo grabado:", audioFile);
       });
-
-      recorder.startRecording();
-
-      setTimeout(() => {
-        recorder.stopRecording(() => {
-          const blob = recorder.getBlob();
-          const extension = isSafari ? 'wav' : 'webm';
-          const fileName = `Record-${Date.now()}.${extension}`;
-          const audioFile = new File([blob], fileName, { type: `audio/${extension}` });
-
-          console.log("Archivo grabado:", audioFile);
-        });
-      }, 5000); // Grabar durante 5 segundos
-    } catch (error) {
-      console.error("Error al grabar:", error);
-    }
-  };
+    }, 5000); // Grabar durante 5 segundos
+  } catch (error) {
+    console.error("Error al grabar:", error);
+  }
+};
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
