@@ -102,8 +102,12 @@ export default function MicrophoneComponent() {
 
   // Función para iniciar la grabación
 
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const [isSafari, setIsSafari] = useState(false);
 
+  useEffect(() => {
+    setIsSafari(/^((?!chrome|android).)*safari/i.test(navigator.userAgent));
+  }, []);
+  
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
