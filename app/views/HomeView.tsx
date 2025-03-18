@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, MutableRefObject  } from "react";
+import { useState, useEffect } from "react";
 import { uploadAudio, getFilesFromS3 } from '../api/ApiService';
 import toast from 'react-hot-toast';
-import ExitModal from './ExitModal'; // Importa el componente ExitModal
-import RecordRTC from 'recordrtc';
+import ExitModal from './ExitModal';
+import AudioRecorder from './AudioRecorder'; // Importar el componente AudioRecorder
 
 interface UploadedAudio {
   name: string;
@@ -22,31 +22,24 @@ interface S3File {
 }
 
 export default function MicrophoneComponent() {
-  const [isClient, setIsClient] = useState(false);
-  const mediaRecorderRef = useRef<RecordRTC | null>(null); 
-  const [isRecording, setIsRecording] = useState(false);
   const [uploadedAudios, setUploadedAudios] = useState<UploadedAudio[]>([]);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
   const [showExitModal, setShowExitModal] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
   const [s3Files, setS3Files] = useState<S3File[]>([]);
   const [groupedFiles, setGroupedFiles] = useState<
     Record<string, { audio: S3File | null; transcript: S3File | null }>
   >({});
-
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Función para agrupar archivos de S3
   const groupFiles = (files: S3File[]) => {
     return files.reduce((acc, file) => {
       const fileName = file.Key.split("/").pop() || "";
       const fileId = fileName.split("_")[0]; // Extraer el ID común
-  
+
       if (!acc[fileId]) {
         acc[fileId] = { audio: null, transcript: null };
       }
-  
+
       // Identificar si es un archivo de audio (extensiones de audio comunes)
       const audioExtensions = [".wav", ".mp3", ".ogg", ".flac", ".aac", ".m4a", ".webm", ".opus"];
       if (audioExtensions.some(ext => fileName.endsWith(ext))) {
@@ -56,7 +49,7 @@ export default function MicrophoneComponent() {
       else if (fileName.endsWith(".txt")) {
         acc[fileId].transcript = file;
       }
-  
+
       return acc;
     }, {} as Record<string, { audio: S3File | null; transcript: S3File | null }>);
   };
@@ -74,7 +67,7 @@ export default function MicrophoneComponent() {
         toast.error("Error al obtener los archivos de S3. Intenta de nuevo.");
       }
     };
-  
+
     fetchFiles();
   }, []);
 
@@ -101,68 +94,21 @@ export default function MicrophoneComponent() {
     };
   }, []);
 
-  // Función para iniciar la grabación
-  useEffect(() => {
-    setIsClient(typeof window !== "undefined");
-  }, []);
-
-  const startRecording = async () => {
-    if (!isClient) return; // Evita ejecutar código en el servidor
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new RecordRTC(stream, {
-        type: "audio",
-        mimeType: "audio/wav",
-        recorderType: RecordRTC.StereoAudioRecorder,
-      });
-
-      recorder.startRecording();
-      mediaRecorderRef.current = recorder;
-      setIsRecording(true);
-
-      // Iniciar temporizador de grabación
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
-      }, 1000);
-    } catch (error) {
-      console.error("Error al grabar:", error);
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stopRecording(() => {
-        const audioBlob = mediaRecorderRef.current?.getBlob();
-        if (audioBlob) {
-          const audioURL = URL.createObjectURL(audioBlob);
-          console.log("Audio disponible en:", audioURL);
-        }
-      });
-    }
-
-    setIsRecording(false);
-    clearInterval(recordingTimerRef.current!);
-    setRecordingDuration(0);
-  };
-
-  if (!isClient) return null; // No renderizar nada en el servidor
-
   // Función para manejar la subida de archivos
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       const files = Array.from(event.target.files);
-  
+
       files.forEach(async (file) => {
         const uniqueId = Date.now();
         const uniqueFileName = `${uniqueId}_${file.name}`;
-  
+
         // Agregar el archivo a la lista de audios subidos con estado "Pendiente"
         setUploadedAudios((prev) => [
           ...prev,
           { name: uniqueFileName, status: "Pendiente" },
         ]);
-  
+
         try {
           // Subir el archivo
           await uploadAudio(
@@ -175,7 +121,7 @@ export default function MicrophoneComponent() {
         } catch (error) {
           console.error("Error al subir el archivo:", error);
           toast.error("Error al subir el archivo. Intenta de nuevo.");
-  
+
           // Actualizar el estado del archivo a "Error al procesar"
           setUploadedAudios((prev) =>
             prev.map((audio) =>
@@ -186,6 +132,41 @@ export default function MicrophoneComponent() {
           );
         }
       });
+    }
+  };
+
+  // Función para manejar la grabación detenida
+  const handleRecordingStop = async (audioBlob: Blob) => {
+    const uniqueId = Date.now();
+    const uniqueFileName = `${uniqueId}_recording.wav`;
+
+    // Agregar el archivo a la lista de audios subidos con estado "Pendiente"
+    setUploadedAudios((prev) => [
+      ...prev,
+      { name: uniqueFileName, status: "Pendiente" },
+    ]);
+
+    try {
+      // Subir el archivo
+      await uploadAudio(
+        new File([audioBlob], uniqueFileName, { type: "audio/wav" }),
+        uniqueFileName,
+        setUploadedAudios,
+        setProcessingMessage,
+        setGroupedFiles
+      );
+    } catch (error) {
+      console.error("Error al subir el archivo:", error);
+      toast.error("Error al subir el archivo. Intenta de nuevo.");
+
+      // Actualizar el estado del archivo a "Error al procesar"
+      setUploadedAudios((prev) =>
+        prev.map((audio) =>
+          audio.name === uniqueFileName
+            ? { ...audio, status: "Error al procesar" }
+            : audio
+        )
+      );
     }
   };
 
@@ -214,38 +195,8 @@ export default function MicrophoneComponent() {
 
         {/* Contenido principal */}
         <section className="px-8 py-12 flex-grow">
-          {/* Grabación de audio */}
-          <article className="text-center">
-            <h1 className="text-xl font-extrabold text-gray-700 mb-8">🎤 Graba un audio</h1>
-            <div className="flex justify-center">
-              {isRecording ? (
-                <button
-                  onClick={stopRecording}
-                  className="p-6 rounded-full bg-red-500 text-white text-3xl shadow-md animate-pulse hover:bg-red-600 transition-all"
-                  aria-label="Detener grabación"
-                >
-                  ⏹️
-                </button>
-              ) : (
-                <button
-                  onClick={startRecording}
-                  className="p-6 rounded-full bg-[#47CACC] text-white shadow-md hover:bg-[#3aa8a9] transition-all"
-                  aria-label="Iniciar grabación"
-                >
-                  <img
-                    src="https://test-api-bot.s3.us-east-1.amazonaws.com/microphone-solid+(1).svg"
-                    className="w-6 aspect-square"
-                    alt="Icono de micrófono"
-                  />
-                </button>
-              )}
-            </div>
-            {isRecording && (
-              <p className="text-red-500 mt-2" aria-live="polite">
-                🔴 Grabando... {recordingDuration}s
-              </p>
-            )}
-          </article>
+          {/* Usar el componente AudioRecorder */}
+          <AudioRecorder onRecordingStop={handleRecordingStop} />
 
           {/* Separador visual */}
           <div className="mt-8 text-center flex flex-col justify-center items-center">
@@ -334,7 +285,7 @@ export default function MicrophoneComponent() {
             <article className="mt-8">
               <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📁 Archivos del Usuario</h3>
               <ul className="space-y-3">
-              {Object.entries(groupedFiles).map(([fileId, files], index) => (
+                {Object.entries(groupedFiles).map(([fileId, files], index) => (
                   <li
                     key={index}
                     className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center"
