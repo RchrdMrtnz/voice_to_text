@@ -284,54 +284,62 @@ export default function MicrophoneComponent() {
           )}
   
           {/* Archivos totales en S3 */}
-          {Object.entries(groupedFiles).map(([fileId, files], index) => (
-            <li
-              key={index}
-              className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-            >
-              <div className="flex flex-col w-full sm:w-auto">
-                {/* Usar truncate para textos largos */}
-                <span className="text-gray-700 font-medium truncate">
-                  {files.audio ? files.audio.Key.split("/").pop() : files.transcript?.Key.split("/").pop()}
-                </span>
-                {files.audio && (
-                  <span className="text-sm text-gray-500">
-                    Tamaño: {(files.audio.Size / 1024).toFixed(2)} KB
-                  </span>
-                )}
-                {files.audio && (
-                  <span className="text-sm text-gray-500">
-                    Última modificación: {new Date(files.audio.LastModified).toLocaleString()}
-                  </span>
-                )}
-              </div>
-
-              {/* Botones de descarga */}
-              <div className="w-full sm:w-auto flex flex-wrap gap-2">
-                {files.audio && (
-                  <a
-                    href={files.audio.URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
+          {Object.entries(groupedFiles).length > 0 && (
+            <article className="mt-8">
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📁 Archivos del Usuario</h3>
+              <ul className="space-y-3">
+                {/* Archivos totales en S3 */}
+                {Object.entries(groupedFiles).map(([fileId, files], index) => (
+                  <li
+                    key={index}
+                    className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
                   >
-                    🎧 Audio
-                  </a>
-                )}
+                    <div className="flex flex-col w-full sm:w-auto">
+                      {/* Usar truncate para textos largos */}
+                      <span className="text-gray-700 font-medium truncate">
+                        {files.audio ? files.audio.Key.split("/").pop() : files.transcript?.Key.split("/").pop()}
+                      </span>
+                      {files.audio && (
+                        <span className="text-sm text-gray-500">
+                          Tamaño: {(files.audio.Size / 1024).toFixed(2)} KB
+                        </span>
+                      )}
+                      {files.audio && (
+                        <span className="text-sm text-gray-500">
+                          Última modificación: {new Date(files.audio.LastModified).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
 
-                {files.transcript && (
-                  <a
-                    href={files.transcript.URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
-                  >
-                    📄 Transcripción
-                  </a>
-                )}
-              </div>
-            </li>
-          ))}
+                    {/* Botones de descarga */}
+                    <div className="w-full sm:w-auto flex flex-wrap gap-2">
+                      {files.audio && (
+                        <a
+                          href={files.audio.URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
+                        >
+                          🎧 Audio
+                        </a>
+                      )}
+
+                      {files.transcript && (
+                        <a
+                          href={files.transcript.URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
+                        >
+                          📄 Transcripción
+                        </a>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          )}
         </section>
       </main>
     </div>
