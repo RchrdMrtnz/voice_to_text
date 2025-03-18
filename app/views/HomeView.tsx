@@ -22,6 +22,7 @@ interface S3File {
 }
 
 export default function MicrophoneComponent() {
+  const [isClient, setIsClient] = useState(false);
   const mediaRecorderRef = useRef<RecordRTC | null>(null); 
   const [isRecording, setIsRecording] = useState(false);
   const [uploadedAudios, setUploadedAudios] = useState<UploadedAudio[]>([]);
@@ -101,9 +102,14 @@ export default function MicrophoneComponent() {
   }, []);
 
   // Función para iniciar la grabación
+  useEffect(() => {
+    setIsClient(typeof window !== "undefined");
+  }, []);
+
   const startRecording = async () => {
+    if (!isClient) return; // Evita ejecutar código en el servidor
+
     try {
-      if (typeof navigator === "undefined") return; // Evita que se ejecute en el servidor
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new RecordRTC(stream, {
         type: "audio",
@@ -127,21 +133,20 @@ export default function MicrophoneComponent() {
   const stopRecording = () => {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stopRecording(() => {
-        // Obtener el blob de la grabación
         const audioBlob = mediaRecorderRef.current?.getBlob();
         if (audioBlob) {
           const audioURL = URL.createObjectURL(audioBlob);
           console.log("Audio disponible en:", audioURL);
-          toast.success("Grabación detenida");
         }
       });
     }
-  
+
     setIsRecording(false);
     clearInterval(recordingTimerRef.current!);
     setRecordingDuration(0);
   };
-  
+
+  if (!isClient) return null; // No renderizar nada en el servidor
 
   // Función para manejar la subida de archivos
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
