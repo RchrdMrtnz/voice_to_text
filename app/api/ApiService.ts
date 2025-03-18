@@ -10,7 +10,6 @@ interface UploadedAudio {
   audioLink?: string;
 }
 
-
 // Función para verificar el estado de la transcripción
 const checkTranscriptionStatus = async (
   taskId: string,
@@ -83,12 +82,13 @@ const checkTranscriptionStatus = async (
 
 export const uploadAudio = async (
   audioFile: File,
-  fileName: string, // Usamos el fileName generado antes de la llamada
+  fileName: string,
   setUploadedAudios: Dispatch<SetStateAction<UploadedAudio[]>>,
-  setProcessingMessage: Dispatch<SetStateAction<string | null>>
+  setProcessingMessage: Dispatch<SetStateAction<string | null>>,
+  setGroupedFiles: Dispatch<SetStateAction<Record<string, { audio: S3File | null; transcript: S3File | null }>>>
 ) => {
   const formData = new FormData();
-  formData.append("file", audioFile, fileName); // Usamos el fileName recibido
+  formData.append("file", audioFile, fileName);
 
   const controller = new AbortController();
   const timeout = 900000; // 10 minutos en milisegundos
@@ -113,17 +113,20 @@ export const uploadAudio = async (
 
     const uploadData = await uploadResponse.json();
     setProcessingMessage("Archivo subido con éxito");
-    
-    // 🔹 Asegurar que el estado cambie a "Procesando"
+
+    // Actualizar el estado del archivo a "Procesando"
     setUploadedAudios((prev) =>
       prev.map((audio) =>
         audio.name === fileName ? { ...audio, status: "Procesando" } : audio
       )
     );
-    
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Obtener la lista actualizada de archivos de S3
+    const updatedFiles = await getFilesFromS3();
+    const groupedFiles = groupFiles(updatedFiles); // Agrupar los archivos
+    setGroupedFiles(groupedFiles); // Actualizar el estado de groupedFiles
 
+    // Procesar la transcripción
     const fileNameKey = uploadData.file_info.Key.split("/").pop();
     console.log("🔍 Iniciando transcripción...");
 
@@ -153,7 +156,6 @@ export const uploadAudio = async (
     setProcessingMessage(null);
   }
 };
-
 
 // Definir la interfaz para S3File
 interface S3File {
@@ -205,4 +207,28 @@ export const getFilesFromS3 = async (): Promise<S3File[]> => {
     console.error("🚨 Error al obtener los archivos de S3:", error);
     throw error;
   }
+};
+
+// Función para agrupar archivos de S3
+const groupFiles = (files: S3File[]) => {
+  return files.reduce((acc, file) => {
+    const fileName = file.Key.split("/").pop() || "";
+    const fileId = fileName.split("_")[0]; // Extraer el ID común
+
+    if (!acc[fileId]) {
+      acc[fileId] = { audio: null, transcript: null };
+    }
+
+    // Identificar si es un archivo de audio (extensiones de audio comunes)
+    const audioExtensions = [".wav", ".mp3", ".ogg", ".flac", ".aac", ".m4a", ".webm", ".opus"];
+    if (audioExtensions.some(ext => fileName.endsWith(ext))) {
+      acc[fileId].audio = file;
+    }
+    // Identificar si es un archivo de transcripción (extensión .txt)
+    else if (fileName.endsWith(".txt")) {
+      acc[fileId].transcript = file;
+    }
+
+    return acc;
+  }, {} as Record<string, { audio: S3File | null; transcript: S3File | null }>);
 };
