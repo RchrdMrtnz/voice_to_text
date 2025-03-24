@@ -237,7 +237,7 @@ const groupFiles = (files: S3File[]) => {
 // Función para generar un resumen del archivo de texto
 export const generateSummary = async (s3Key: string) => {
   try {
-    const response = await fetch(`${backendUrl}/api/resumen/?s3_key=${s3Key}`, {
+    const response = await fetch(`${backendUrl}api/resumen/?s3_key=${s3Key}`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
