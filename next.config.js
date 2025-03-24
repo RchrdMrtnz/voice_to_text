@@ -4,28 +4,16 @@ const nextConfig = {}
 module.exports = {
   async rewrites() {
     return [
+      // Rutas que NO llevan /api/ en el backend
       {
         source: "/api/:path*",
         destination: `${process.env.NEXT_PUBLIC_API_URL}/:path*`,
       },
+      // Rutas que SÍ llevan /api/ en el backend (como /api/resumen/)
       {
         source: "/backend-api/:path*",
         destination: `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`,
       },
     ];
-  },
-  async headers() {
-    return [
-      {
-        // Aplica estos headers a todas las rutas API
-        source: "/:path*",
-        headers: [
-          { key: "Access-Control-Allow-Credentials", value: "true" },
-          { key: "Access-Control-Allow-Origin", value: "*" },
-          { key: "Access-Control-Allow-Methods", value: "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
-          { key: "Access-Control-Allow-Headers", value: "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version" },
-        ],
-      },
-    ];
-  },
+  }
 };

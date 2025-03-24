@@ -321,7 +321,10 @@ export default function MicrophoneComponent() {
                       {/* Botón para generar resumen (solo visible si está completado) */}
                       {audio.status === "Completado" && audio.transcriptLink && (
                         <button
-                          onClick={() => handleGenerateSummary(audio.transcriptLink!)}
+                        onClick={() => {
+                          const s3Key = audio.transcriptLink?.split('amazonaws.com/')[1] || '';
+                          handleGenerateSummary(s3Key);
+                        }}
                           className="w-full sm:w-auto px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
                         >
                           📝 Generar Resumen
