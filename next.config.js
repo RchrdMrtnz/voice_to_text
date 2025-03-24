@@ -1,19 +1,24 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {}
-
-module.exports = {
+const nextConfig = {
   async rewrites() {
     return [
-      // Rutas que NO llevan /api/ en el backend
       {
         source: "/api/:path*",
         destination: `${process.env.NEXT_PUBLIC_API_URL}/:path*`,
       },
-      // Rutas que SÍ llevan /api/ en el backend (como /api/resumen/)
+    ];
+  },
+  // Añade esto para evitar doble encoding
+  async headers() {
+    return [
       {
-        source: "/backend-api/:path*",
-        destination: `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`,
+        source: "/api/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" }, // Solo para desarrollo
+        ],
       },
     ];
-  }
+  },
 };
+
+module.exports = nextConfig;

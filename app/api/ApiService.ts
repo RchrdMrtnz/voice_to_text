@@ -2,7 +2,6 @@
 import { Dispatch, SetStateAction } from 'react'; // Importa los tipos necesarios
 
 const backendUrl = "api/";
-const backendApi = "backend-api/"
 interface UploadedAudio {
   name: string;
   status: "Pendiente" | "Procesando" | "Completado" | "Error al procesar";
@@ -233,32 +232,18 @@ const groupFiles = (files: S3File[]) => {
   }, {} as Record<string, { audio: S3File | null; transcript: S3File | null }>);
 };
 
-
-// Función para generar un resumen del archivo de texto
 export const generateSummary = async (s3Key: string) => {
   try {
-    // Extraer solo la parte de la clave S3 si se recibe una URL completa
-    const keyOnly = s3Key.includes('amazonaws.com/') 
-      ? s3Key.split('amazonaws.com/')[1] 
-      : s3Key;
+    const keyOnly = s3Key.split('amazonaws.com/').pop() || s3Key;
+    const encodedKey = encodeURIComponent(keyOnly); // Codifica solo una vez
 
-    const response = await fetch(`${backendApi}resumen/?s3_key=${encodeURIComponent(keyOnly)}`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    // Usa la ruta del proxy (localhost:3000/api/...)
+    const response = await fetch(`/api/resumen/?s3_key=${encodedKey}`);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("🚨 Error al generar el resumen:", errorText);
-      throw new Error(`Error al generar el resumen: ${response.statusText}`);
-    }
-
-    const summaryData = await response.json();
-    return summaryData;
+    if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
+    return await response.json();
   } catch (error) {
-    console.error("🚨 Error al generar el resumen:", error);
+    console.error("Error en generateSummary:", error);
     throw error;
   }
 };
