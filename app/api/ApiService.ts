@@ -232,3 +232,28 @@ const groupFiles = (files: S3File[]) => {
     return acc;
   }, {} as Record<string, { audio: S3File | null; transcript: S3File | null }>);
 };
+
+
+// Función para generar un resumen del archivo de texto
+export const generateSummary = async (s3Key: string) => {
+  try {
+    const response = await fetch(`${backendUrl}/api/resumen/?s3_key=${s3Key}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("🚨 Error al generar el resumen:", errorText);
+      throw new Error(`Error al generar el resumen: ${response.statusText}`);
+    }
+
+    const summaryData = await response.json();
+    return summaryData;
+  } catch (error) {
+    console.error("🚨 Error al generar el resumen:", error);
+    throw error;
+  }
+};

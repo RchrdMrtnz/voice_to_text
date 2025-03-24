@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { uploadAudio, getFilesFromS3 } from '../api/ApiService';
+import { uploadAudio, getFilesFromS3, generateSummary  } from '../api/ApiService';
 import toast from 'react-hot-toast';
 import ExitModal from './ExitModal';
 import dynamic from "next/dynamic";
@@ -14,6 +14,7 @@ interface UploadedAudio {
   status: "Pendiente" | "Procesando" | "Completado" | "Error al procesar";
   transcriptLink?: string;
   audioLink?: string;
+  summary?: string;
 }
 
 interface S3File {
@@ -32,7 +33,7 @@ export default function MicrophoneComponent() {
   const [groupedFiles, setGroupedFiles] = useState<
     Record<string, { audio: S3File | null; transcript: S3File | null }>
   >({});
-
+  const [summary, setSummary] = useState<{ mensaje: string; resumen: string; resumen_url: string; resumen_s3_key: string } | null>(null);
   // Función para agrupar archivos de S3
   const groupFiles = (files: S3File[]) => {
     return files.reduce((acc, file) => {
@@ -173,6 +174,38 @@ export default function MicrophoneComponent() {
     }
   };
 
+  const handleGenerateSummary = async (s3Key: string) => {
+    try {
+      setProcessingMessage("Generando resumen...");
+      const summaryData = await generateSummary(s3Key);
+      setSummary(summaryData);
+      setProcessingMessage(null);
+      toast.success("Resumen generado con éxito");
+    } catch (error) {
+      console.error("🚨 Error al generar el resumen:", error);
+      setProcessingMessage("Error al generar el resumen");
+      toast.error("Error al generar el resumen. Intenta de nuevo.");
+    }
+  };
+
+  // Obtener los archivos de S3 al cargar la página
+  useEffect(() => {
+    const fetchFiles = async () => {
+      try {
+        const files = await getFilesFromS3();
+        setS3Files(files);
+        const grouped = groupFiles(files);
+        setGroupedFiles(grouped);
+      } catch (error) {
+        console.error("🚨 Error al obtener los archivos de S3:", error);
+        toast.error("Error al obtener los archivos de S3. Intenta de nuevo.");
+      }
+    };
+
+    fetchFiles();
+  }, []);
+
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full py-10 bg-[#70D7D9]">
       {/* Modal de confirmación */}
@@ -237,7 +270,7 @@ export default function MicrophoneComponent() {
             </div>
           )}
   
-          {/* Lista de audios subidos */}
+         {/* Lista de audios subidos */}
           {uploadedAudios.length > 0 && (
             <article className="mt-8">
               <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📁 Archivos Subidos</h3>
@@ -247,10 +280,15 @@ export default function MicrophoneComponent() {
                     key={index}
                     className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-center gap-4"
                   >
-                    <div className="flex flex-col sm:flex-row items-center gap-2">
+                    {/* Contenedor principal (nombre y estado) */}
+                    <div className="flex flex-col sm:flex-row items-center gap-2 flex-1 min-w-0 w-full sm:w-auto">
                       <span className="text-gray-500">{index + 1}.</span>
                       <span className="text-xl">🎵</span>
-                      <span className="text-gray-700 text-center sm:text-left text-ellipsis">{audio.name}</span>
+                      {/* Nombre del archivo */}
+                      <span className="text-gray-700 text-sm truncate flex-1 min-w-0 w-full sm:w-auto text-center sm:text-left">
+                        {audio.name}
+                      </span>
+                      {/* Estado del archivo */}
                       <span
                         className={`px-3 py-1 rounded-full text-sm font-medium ${
                           audio.status === "Pendiente"
@@ -265,79 +303,130 @@ export default function MicrophoneComponent() {
                         {audio.status}
                       </span>
                     </div>
-  
-                    {/* Botón para descargar transcripción */}
-                    {audio.status === "Completado" && audio.transcriptLink && (
-                      <a
-                        href={audio.transcriptLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full sm:w-auto px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
-                      >
-                        📥 Descargar TXT
-                      </a>
+
+                    {/* Botones de acción (descargar y generar resumen) */}
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                      {/* Botón para descargar transcripción (solo visible si está completado) */}
+                      {audio.status === "Completado" && audio.transcriptLink && (
+                        <a
+                          href={audio.transcriptLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full sm:w-auto px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
+                        >
+                          📥 Descargar TXT
+                        </a>
+                      )}
+
+                      {/* Botón para generar resumen (solo visible si está completado) */}
+                      {audio.status === "Completado" && audio.transcriptLink && (
+                        <button
+                          onClick={() => handleGenerateSummary(audio.transcriptLink!)}
+                          className="w-full sm:w-auto px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
+                        >
+                          📝 Generar Resumen
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Mostrar el resumen generado (si existe) */}
+                    {audio.summary && (
+                      <div className="w-full mt-4 p-4 bg-gray-100 rounded-lg border border-gray-200">
+                        <h4 className="text-md font-semibold text-gray-700 mb-2">Resumen:</h4>
+                        <p className="text-gray-600 text-sm">{audio.summary}</p>
+                      </div>
                     )}
                   </li>
                 ))}
               </ul>
             </article>
           )}
-  
+            
           {/* Archivos totales en S3 */}
           {Object.entries(groupedFiles).length > 0 && (
+              <article className="mt-8">
+                <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📁 Archivos del Usuario</h3>
+                <ul className="space-y-3">
+                  {Object.entries(groupedFiles).map(([fileId, files], index) => (
+                    <li
+                      key={index}
+                      className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+                    >
+                      {/* Contenedor del nombre y detalles del archivo */}
+                      <div className="flex flex-col w-full sm:w-auto flex-1 min-w-0">
+                        {/* Nombre del archivo */}
+                        <span className="text-gray-700 font-medium truncate">
+                          {files.audio ? files.audio.Key.split("/").pop() : files.transcript?.Key.split("/").pop()}
+                        </span>
+
+                        {/* Detalles del archivo (tamaño y última modificación) */}
+                        {files.audio && (
+                          <>
+                            <span className="text-sm text-gray-500 truncate">
+                              Tamaño: {(files.audio.Size / 1024).toFixed(2)} KB
+                            </span>
+                            <span className="text-sm text-gray-500 truncate">
+                              Última modificación: {new Date(files.audio.LastModified).toLocaleString()}
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Botones de descarga */}
+                      <div className="w-full sm:w-auto flex flex-wrap gap-2">
+                        {files.audio && (
+                          <a
+                            href={files.audio.URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center whitespace-nowrap"
+                          >
+                            🎧 Audio
+                          </a>
+                        )}
+
+                        {files.transcript && (
+                          <a
+                            href={files.transcript.URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center whitespace-nowrap"
+                          >
+                            📄 Transcripción
+                          </a>
+                        )}
+
+                        {/* Botón para generar resumen */}
+                        {files.transcript && (
+                          <button
+                            onClick={() => handleGenerateSummary(files.transcript!.Key)}
+                            className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center whitespace-nowrap"
+                          >
+                            📝  Generar Resumen
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+
+          {/* Mostrar el resumen generado */}
+          {summary && (
             <article className="mt-8">
-              <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📁 Archivos del Usuario</h3>
-              <ul className="space-y-3">
-                {/* Archivos totales en S3 */}
-                {Object.entries(groupedFiles).map(([fileId, files], index) => (
-                  <li
-                    key={index}
-                    className="p-4 bg-gray-50 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-                  >
-                    <div className="flex flex-col w-full sm:w-auto">
-                      {/* Usar truncate para textos largos */}
-                      <span className="text-gray-700 font-medium truncate">
-                        {files.audio ? files.audio.Key.split("/").pop() : files.transcript?.Key.split("/").pop()}
-                      </span>
-                      {files.audio && (
-                        <span className="text-sm text-gray-500">
-                          Tamaño: {(files.audio.Size / 1024).toFixed(2)} KB
-                        </span>
-                      )}
-                      {files.audio && (
-                        <span className="text-sm text-gray-500">
-                          Última modificación: {new Date(files.audio.LastModified).toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Botones de descarga */}
-                    <div className="w-full sm:w-auto flex flex-wrap gap-2">
-                      {files.audio && (
-                        <a
-                          href={files.audio.URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
-                        >
-                          🎧 Audio
-                        </a>
-                      )}
-
-                      {files.transcript && (
-                        <a
-                          href={files.transcript.URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-full sm:w-auto px-3 py-2 bg-[#3fb1b3] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
-                        >
-                          📄 Transcripción
-                        </a>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">📝 Resumen Generado</h3>
+              <div className="p-4 bg-gray-50 rounded-xl border">
+                <p className="text-gray-700">{summary.resumen}</p>
+                <a
+                  href={summary.resumen_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-4 inline-block px-4 py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center"
+                >
+                  📥 Descargar Resumen
+                </a>
+              </div>
             </article>
           )}
         </section>
