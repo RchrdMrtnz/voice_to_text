@@ -35,8 +35,8 @@ interface SummaryModalState {
 interface GroupedFile {
   audio: S3File | null;
   transcript: S3File | null;
-  summary: S3File | null;
-  id: string;
+  summary?: S3File | null;  // Make summary optional
+  id?: string;              // Make id optional
 }
 
 export default function MicrophoneComponent() {
@@ -67,9 +67,8 @@ const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
       fileId = parts[1];
     }
     else if (fileName.includes('resumen')) {
-      // Si es un resumen, usamos el timestamp que está antes de '_resumen'
       const resumenParts = fileName.split('_resumen')[0].split('_');
-      fileId = resumenParts[resumenParts.length - 1]; // Tomamos el último segmento antes de '_resumen'
+      fileId = resumenParts[resumenParts.length - 1];
     }
     else {
       fileId = fileName.split('_')[0];
@@ -78,9 +77,7 @@ const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
     if (!acc[fileId]) {
       acc[fileId] = { 
         audio: null, 
-        transcript: null,
-        summary: null,
-        id: fileId
+        transcript: null
       };
     }
 
