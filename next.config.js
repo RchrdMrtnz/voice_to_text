@@ -8,7 +8,6 @@ const nextConfig = {
       },
     ];
   },
-  // Añade esto para evitar doble encoding
   async headers() {
     return [
       {

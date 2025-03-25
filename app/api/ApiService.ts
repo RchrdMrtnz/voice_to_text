@@ -237,8 +237,7 @@ export const generateSummary = async (s3Key: string) => {
     const keyOnly = s3Key.split('amazonaws.com/').pop() || s3Key;
     const encodedKey = encodeURIComponent(keyOnly); // Codifica solo una vez
 
-    // Usa la ruta del proxy (localhost:3000/api/...)
-    const response = await fetch(`/api/resumen/?s3_key=${encodedKey}`);
+    const response = await fetch(`/api/resumen?s3_key=${encodedKey}`);
 
     if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
     return await response.json();
