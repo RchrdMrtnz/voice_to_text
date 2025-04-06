@@ -1,15 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { uploadAudio, getFilesFromS3, generateSummary } from '../api/ApiService';
+import { uploadAudio, getFilesFromS3, generateSummary } from '../services/ApiService';
 import toast from 'react-hot-toast';
 import ExitModal from './ExitModal';
 import dynamic from "next/dynamic";
-
+import SettingsModal from './SettingsModal';
 const AudioRecorder = dynamic(() => import("./AudioRecorder"), {
   ssr: false,
 });
-
+const EmailModal = dynamic(() => import("./EmailView"), {
+  ssr: false,
+});
 interface UploadedAudio {
   name: string;
   status: "Pendiente" | "Procesando" | "Completado" | "Error al procesar";
@@ -50,7 +52,22 @@ export default function MicrophoneComponent() {
   const [summaryModal, setSummaryModal] = useState<SummaryModalState>({ open: false, content: '', title: '' });
   const [activeTab, setActiveTab] = useState<'uploads' | 'files'>('uploads');
   const [searchTerm, setSearchTerm] = useState('');
-
+  const [emailModal, setEmailModal] = useState({
+    isOpen: false,
+    content: '',
+    fileTitle: '',
+    transcription: ''
+  });
+  
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const openEmailModal = (content: string, fileTitle: string, transcription?: string) => {
+    setEmailModal({
+      isOpen: true,
+      content,
+      fileTitle,
+      transcription: transcription || ''
+    });
+  };
   // Función para agrupar archivos de S3
 // Función para agrupar archivos de S3 - Versión mejorada
 const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
@@ -203,6 +220,30 @@ const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
       // Descargar automáticamente
       await handleDownloadFile(summaryData.resumen_url, downloadName);
       
+      // Actualizar groupedFiles con el nuevo summary
+      setGroupedFiles(prevGroupedFiles => {
+        const updatedGroupedFiles = { ...prevGroupedFiles };
+        
+        // Encontrar el grupo que contiene el transcript con este s3Key
+        for (const [key, group] of Object.entries(updatedGroupedFiles)) {
+          if (group.transcript?.Key === s3Key) {
+            updatedGroupedFiles[key] = {
+              ...group,
+              summary: {
+                Key: summaryData.resumen_s3_key,
+                URL: summaryData.resumen_url,
+                Size: 0, // Puedes ajustar esto si tienes el tamaño
+                LastModified: new Date().toISOString(),
+                ContentType: 'text/plain'
+              }
+            };
+            break;
+          }
+        }
+        
+        return updatedGroupedFiles;
+      });
+      
       setProcessingMessage(null);
       toast.success("Resumen descargado");
       
@@ -326,96 +367,219 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
       <SummaryModal />
 
       <main className="bg-white rounded-xl w-full max-w-3xl shadow-lg flex flex-col mx-2 sm:mx-4">
-        <header className="w-full h-20 sm:h-24 rounded-t-xl flex justify-center items-center bg-[#47CACC]">
-          <img
-            className="w-32 sm:w-40 h-full object-contain"
-            src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png"
-            alt="Logo de Procencia"
-          />
-        </header>
+      <header className="w-full h-20 sm:h-24 rounded-t-xl flex items-center bg-gradient-to-r from-[#47CACC] to-[#3aa8a9] px-12 shadow-sm">
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center">
+            <img
+              className="w-32 sm:w-40 h-auto object-contain"
+              src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png"
+              alt="Logo de Procencia"
+            />
+          </div>
+          
+          <div className="flex items-center">
+            <button
+              onClick={() => setSettingsModalOpen(true)}
+              className="p-2.5 rounded-full hover:bg-white/20 focus:bg-white/30 active:bg-white/40 transition-all flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-white/50"
+              aria-label="Configuración"
+              title="Configuración"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </header>
 
-        <section className="px-3 sm:px-6 py-6 sm:py-8 flex-grow">
-          <AudioRecorder onRecordingStop={handleRecordingStop} />
+        <section className="px-4 sm:px-6 py-6 sm:py-8 flex-grow bg-gray-50">
+          <div className="max-w-4xl mx-auto">
+            {/* Sección del grabador de audio */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-all hover:shadow-md">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[#47CACC]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                Grabador de Audio
+              </h2>
+              
+              <AudioRecorder onRecordingStop={handleRecordingStop} />
+            </div>
 
-          <div className="mt-6 text-center flex flex-col justify-center items-center">
-            <div className="relative">
-              <div className="relative inline-flex items-center justify-center w-12 sm:w-16 h-12 sm:h-16 text-xl sm:text-2xl font-extrabold text-gray-700 transition-transform duration-200 before:absolute before:top-1/2 before:left-[-33%] before:w-6/12 before:h-px before:bg-black before:transform before:-translate-y-1/2 after:absolute after:top-1/2 after:right-[-33%] after:w-6/12 after:h-px after:bg-black after:transform after:-translate-y-1/2">
-                O
+            {/* Separador */}
+            <div className="flex items-center justify-center my-8">
+              <div className="w-24 sm:w-32 h-px bg-gray-300"></div>
+              <span className="mx-4 text-xl sm:text-2xl font-bold text-gray-400">O</span>
+              <div className="w-24 sm:w-32 h-px bg-gray-300"></div>
+            </div>
+
+            {/* Sección de subida de archivos */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-all hover:shadow-md">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[#47CACC]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                Sube audios desde tu dispositivo
+              </h2>
+              
+              <div className="flex justify-center">
+                <label className="flex flex-col items-center justify-center w-full max-w-md h-36 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 hover:border-[#47CACC]/50 transition-all duration-200">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-[#47CACC] mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="text-sm text-gray-600 font-medium">Haz clic aquí o arrastra tus archivos</p>
+                    <p className="text-xs text-gray-500 mt-1">Formatos soportados: MP3, WAV, M4A...</p>
+                  </div>
+                  <input
+                    type="file"
+                    multiple
+                    accept="audio/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                    aria-label="Subir archivos de audio"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {processingMessage && (
+              <div role="alert" className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-center text-sm sm:text-base flex items-center justify-center gap-2">
+                <svg className="animate-spin h-5 w-5 text-amber-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {processingMessage}
+              </div>
+            )}
+
+            {/* Pestañas mejoradas */}
+            <div className="mt-10 mb-4">
+              <div className="border-b border-gray-200">
+                <nav className="-mb-px flex space-x-4 sm:space-x-8">
+                  <button
+                    className={`px-1 py-3 text-sm sm:text-base font-medium flex items-center gap-2 border-b-2 transition-colors duration-200 ${
+                      activeTab === 'uploads'
+                        ? 'border-[#47CACC] text-[#47CACC]'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                    onClick={() => setActiveTab('uploads')}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'uploads' ? 2 : 1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    Subidos recientemente
+                  </button>
+                  <button
+                    className={`px-1 py-3 text-sm sm:text-base font-medium flex items-center gap-2 border-b-2 transition-colors duration-200 ${
+                      activeTab === 'files'
+                        ? 'border-[#47CACC] text-[#47CACC]'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                    onClick={() => setActiveTab('files')}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'files' ? 2 : 1.5} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                    Todos los archivos
+                  </button>
+                </nav>
               </div>
             </div>
           </div>
 
-          <article className="my-6 text-center flex flex-col justify-center items-center">
-            <h2 className="text-lg sm:text-xl font-extrabold text-gray-700 mb-4 sm:mb-6">📂 Sube audios desde tu dispositivo</h2>
-            <label className="flex flex-col items-center justify-center w-full sm:w-80 h-28 sm:h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 transition-all p-3 sm:p-4">
-              <span className="text-3xl sm:text-4xl text-[#47CACC]">📤</span>
-              <span className="text-gray-600 text-xs sm:text-sm mt-2 sm:mt-3">Haz clic aquí o arrastra tus archivos</span>
-              <input
-                type="file"
-                multiple
-                accept="audio/*"
-                className="hidden"
-                onChange={handleFileChange}
-                aria-label="Subir archivos de audio"
-              />
-            </label>
-          </article>
-
-          {processingMessage && (
-            <div role="alert" className="mt-4 p-2 sm:p-3 bg-yellow-100 border border-yellow-300 rounded text-yellow-800 text-center text-sm sm:text-base">
-              {processingMessage}
-            </div>
-          )}
-
-          {/* Pestañas */}
-          <div className="flex border-b pt-4 sm:pt-6 overflow-x-auto">
-            <button
-              className={`flex-1 min-w-[120px] px-3 py-2 text-sm sm:text-base ${activeTab === 'uploads' ? 'border-b-2 border-[#47CACC] text-[#47CACC]' : 'text-gray-500'}`}
-              onClick={() => setActiveTab('uploads')}
-            >
-              Subidos recientemente
-            </button>
-            <button
-              className={`flex-1 min-w-[120px] px-3 py-2 text-sm sm:text-base ${activeTab === 'files' ? 'border-b-2 border-[#47CACC] text-[#47CACC]' : 'text-gray-500'}`}
-              onClick={() => setActiveTab('files')}
-            >
-              Todos los archivos
-            </button>
-          </div>
-
-          {/* Contenido de pestañas */}
           {activeTab === 'uploads' && (
-            <article className="mt-4 sm:mt-6">
+            <article className="mt-6 sm:mt-8">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-200 mb-4">
+                <h3 className="text-lg sm:text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[#47CACC]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  Archivos Subidos
+                </h3>
+              </div>
+
               {filteredAudios.length === 0 ? (
-                <p className="text-gray-500 text-center py-4 text-sm sm:text-base">No hay archivos subidos recientemente</p>
+                <div className="flex flex-col items-center justify-center py-10 bg-gray-50 rounded-xl border border-gray-200">
+                  <p className="text-gray-500 text-center text-sm sm:text-base">No hay archivos subidos recientemente</p>
+                  <p className="text-gray-400 text-center text-xs mt-1">Sube un archivo de audio para comenzar</p>
+                </div>
               ) : (
-                <ul className="space-y-2 sm:space-y-3">
+                <ul className="space-y-3 sm:space-y-4">
                   {filteredAudios.map((audio, index) => (
-                    <li key={index} className="p-3 sm:p-4 bg-gray-50 rounded-xl border">
-                      <div className="flex flex-col sm:flex-row justify-between items-center gap-3 sm:gap-4">
-                        <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 flex-1 min-w-0 w-full sm:w-auto">
-                          <span className="text-gray-500 text-xs sm:text-sm">{index + 1}.</span>
-                          <span className="text-lg sm:text-xl">🎵</span>
-                          <span className="text-gray-700 text-xs sm:text-sm truncate flex-1 min-w-0 text-center sm:text-left">
-                            {audio.name}
-                          </span>
-                          <span className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
-                            audio.status === "Pendiente" ? "bg-gray-200 text-gray-700" :
-                            audio.status === "Procesando" ? "bg-yellow-200 text-yellow-800" :
-                            audio.status === "Completado" ? "bg-green-200 text-green-800" :
-                            "bg-red-200 text-red-800"
-                          }`}>
-                            {audio.status}
-                          </span>
+                    <li key={index} className="p-4 sm:p-5 bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                      <div className="flex flex-col items-start gap-3 sm:gap-4">
+                        <div className="flex gap-3 flex-1 w-full">
+                          <div className="flex items-center justify-center w-8 h-8 bg-[#47CACC]/10 rounded-full">
+                            <span className="text-[#47CACC] font-medium text-sm">{index + 1}</span>
+                          </div>
+                          
+                          <div className="flex flex-col md:flex-row  md:justify-between md:items-center w-full">
+                            <div className="flex items-center gap-4">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                              </svg>
+                              <span className="text-gray-800 font-medium text-sm sm:text-base truncate">
+                                {audio.name}
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center my-4 md:my-0">
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                                audio.status === "Pendiente" ? "bg-gray-100 text-gray-600" :
+                                audio.status === "Procesando" ? "bg-yellow-100 text-yellow-700 border border-yellow-200" :
+                                audio.status === "Completado" ? "bg-green-100 text-green-700 border border-green-200" :
+                                "bg-red-100 text-red-700 border border-red-200"
+                              }`}>
+                                {audio.status === "Pendiente" && (
+                                  <span className="flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Pendiente
+                                  </span>
+                                )}
+                                {audio.status === "Procesando" && (
+                                  <span className="flex items-center gap-1">
+                                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Procesando
+                                  </span>
+                                )}
+                                {audio.status === "Completado" && (
+                                  <span className="flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Completado
+                                  </span>
+                                )}
+                                {audio.status === "Error" && (
+                                  <span className="flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Error
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          </div>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row gap-1 sm:gap-2 w-full sm:w-auto">
+                        <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-start sm:justify-end">
                           {audio.status === "Completado" && audio.transcriptLink && (
                             <button
                               onClick={() => handleDownloadFile(audio.transcriptLink!, `${audio.name}.txt`)}
-                              className="w-full sm:w-auto px-3 sm:px-4 py-1 sm:py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center text-xs sm:text-sm"
+                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-blue-100"
                             >
-                              📥 TXT
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                              </svg>
+                              <span>Descargar TXT</span>
                             </button>
                           )}
 
@@ -425,40 +589,69 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                                 const s3Key = audio.transcriptLink?.split('amazonaws.com/')[1] || '';
                                 handleGenerateSummary(s3Key);
                               }}
-                              className="w-full sm:w-auto px-3 sm:px-4 py-1 sm:py-2 bg-[#47CACC] text-white rounded-full shadow-md hover:bg-[#3aa8a9] transition-all text-center text-xs sm:text-sm"
+                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
                             >
-                              🤖 Resumen
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                              </svg>
+                              <span>Generar Resumen</span>
+                            </button>
+                          )}
+                          
+                          {audio.summary && (
+                            <button
+                              onClick={async () => {
+                                // Verificar si hay un correo predeterminado configurado
+                                const defaultEmail = localStorage.getItem("defaultEmail");
+                                
+                                if (!defaultEmail) {
+                                  toast.error("Necesitas configurar un correo predeterminado en la sección de configuración");
+                                  setSettingsModalOpen(true); // Abre el modal de configuración para que agreguen el correo
+                                  return;
+                                }
+                                
+                                // Mostrar loading
+                                toast.loading("Enviando correo...", { id: "sendingEmail" });
+                                
+                                try {
+                                  const response = await fetch("/api/send-email", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      to: defaultEmail,
+                                      subject: `Resumen: ${audio.name}`,
+                                      summary: audio.summary,
+                                      fileTitle: audio.name
+                                    }),
+                                  });
+                                  
+                                  const data = await response.json();
+                                  
+                                  if (!response.ok) {
+                                    throw new Error(data.message || "Error al enviar el correo");
+                                  }
+                                  
+                                  toast.success("Correo enviado exitosamente", { id: "sendingEmail" });
+                                } catch (error) {
+                                  console.error("Error al enviar el correo:", error);
+                                  toast.error(
+                                    error instanceof Error ? error.message : "Error al enviar el correo", 
+                                    { id: "sendingEmail" }
+                                  );
+                                }
+                              }}
+                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                              </svg>
+                              <span>Enviar por Email</span>
                             </button>
                           )}
                         </div>
                       </div>
-
-                      {audio.summary && (
-                        <div className="w-full mt-2 sm:mt-3">
-                          <div className="flex justify-between items-center">
-                            <button 
-                              onClick={() => toggleSummary(audio.name)}
-                              className="text-xs sm:text-sm text-[#47CACC] font-medium flex items-center"
-                            >
-                              {expandedSummaries[audio.name] ? 'Ocultar' : 'Mostrar'} resumen
-                              <span className="ml-1">
-                                {expandedSummaries[audio.name] ? '↑' : '↓'}
-                              </span>
-                            </button>
-                            <button
-                              onClick={() => openSummaryModal(audio.summary || '', `Resumen: ${audio.name}`)}
-                              className="text-xs sm:text-sm text-[#47CACC] font-medium"
-                            >
-                              Ver completo
-                            </button>
-                          </div>
-                          {expandedSummaries[audio.name] && (
-                            <div className="mt-1 sm:mt-2 p-2 sm:p-3 bg-gradient-to-r from-[#f0fdfa] to-[#ecfdf5] rounded-lg border border-[#d1fae5]">
-                              <p className="text-xs sm:text-sm text-[#064e3b]">{audio.summary}</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </li>
                   ))}
                 </ul>
@@ -467,30 +660,50 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
           )}
 
           {activeTab === 'files' && (
-            <article className="mt-4 sm:mt-6">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-700 mb-3 sm:mb-4 pb-2 border-b">📁 Archivos Guardados</h3>
-                        {/* Barra de búsqueda */}
-          <div className="relative my-9">
-            <input
-              type="text"
-              placeholder="Buscar en archivos..."
-              className="w-full p-2 sm:p-3 pl-8 sm:pl-10 rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#47CACC] text-sm sm:text-base"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            <span className="absolute left-2 sm:left-3 top-2 sm:top-3 text-gray-400">🔍</span>
-          </div>
+            <article className="mt-6 sm:mt-8">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                <h3 className="text-lg sm:text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[#47CACC]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                  </svg>
+                  Archivos Guardados
+                </h3>
+              </div>
+
+              {/* Barra de búsqueda */}
+              <div className="relative my-6">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Buscar en archivos..."
+                  className="w-full p-3 pl-10 rounded-lg border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#47CACC] focus:border-[#47CACC] text-sm sm:text-base transition-all duration-200"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+
               {filteredGroupedFiles.length === 0 ? (
-                <p className="text-gray-500 text-center py-4 text-sm sm:text-base">No se encontraron archivos</p>
+                <div className="flex flex-col items-center justify-center py-10 bg-gray-50 rounded-xl border border-gray-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6" />
+                  </svg>
+                  <p className="text-gray-500 text-center text-sm sm:text-base">No se encontraron archivos</p>
+                  <p className="text-gray-400 text-center text-xs mt-1">Sube un archivo o realiza una búsqueda diferente</p>
+                </div>
               ) : (
-                <ul className="space-y-3">
+                <ul className="space-y-4">
                   {filteredGroupedFiles.map((files) => (
-                    <li key={files.id} className="p-3 sm:p-4 bg-gray-50 rounded-xl border">
-                      <div className="w-full flex justify-between">
-                        <span className="text-xs text-gray-500">
+                    <li key={files.id} className="p-4 sm:p-5 bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                      <div className="w-full flex justify-between items-center mb-3">
+                        <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded">
                           ARCHIVO
                         </span>
-                        <span className="text-xs text-gray-500 mb-4">
+                        <span className="text-xs text-gray-500">
                           {new Date(
                             files.audio?.LastModified || 
                             files.transcript?.LastModified || 
@@ -498,19 +711,22 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                           ).toLocaleString()}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-sm font-medium text-gray-700 my-2">
+                      
+                      <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-sm sm:text-base font-medium text-gray-800 truncate max-w-xs sm:max-w-sm">
                           {files.audio?.Key.split("/").pop() || files.transcript?.Key.split("/").pop()}
-                        </span>
+                        </h4>
                       </div>
                       
                       <div className="flex flex-wrap gap-2 sm:justify-end">
                         {files.audio && (
                           <button
                             onClick={() => handleDownloadFile(files.audio!.URL, files.audio!.Key.split("/").pop()!)}
-                            className="px-3 py-1 sm:px-4 sm:py-2 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 text-xs sm:text-sm flex items-center gap-1"
+                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-blue-100"
                           >
-                            <span>🎧</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                            </svg>
                             <span>Audio</span>
                           </button>
                         )}
@@ -518,9 +734,11 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                         {files.transcript && (
                           <button
                             onClick={() => handleDownloadFile(files.transcript!.URL, files.transcript!.Key.split("/").pop()!)}
-                            className="px-3 py-1 sm:px-4 sm:py-2 bg-green-100 text-green-700 rounded-full hover:bg-green-200 text-xs sm:text-sm flex items-center gap-1"
+                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
                           >
-                            <span>📄</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
                             <span>Transcripción</span>
                           </button>
                         )}
@@ -528,22 +746,99 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                         {files.transcript && !files.summary && (
                           <button
                             onClick={() => handleGenerateSummary(files.transcript!.Key)}
-                            className="px-3 py-1 sm:px-4 sm:py-2 bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 text-xs sm:text-sm flex items-center gap-1"
+                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
                           >
-                            <span>🤖</span>
-                            <span>Resumen</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            <span>Generar Resumen</span>
                           </button>
                         )}
                         
                         {files.summary && (
-                          <button
-                            onClick={() => handleDownloadFile(files.summary!.URL, files.summary!.Key.split("/").pop()!)}
-                            className="px-3 py-1 sm:px-4 sm:py-2 bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 text-xs sm:text-sm flex items-center gap-1"
-                          >
-                            <span>📝</span>
-                            <span>Resumen</span>
-                          </button>
-                        )}
+  <>
+    <button
+      onClick={() => handleDownloadFile(files.summary!.URL, files.summary!.Key.split("/").pop()!)}
+      className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h7" />
+      </svg>
+      <span>Ver Resumen</span>
+    </button>
+    
+    <button
+      onClick={async () => {
+        // Verificar si hay un correo predeterminado configurado
+        const defaultEmail = localStorage.getItem("defaultEmail");
+        
+        if (!defaultEmail) {
+          toast.error("Necesitas configurar un correo predeterminado en la sección de configuración");
+          setSettingsModalOpen(true);
+          return;
+        }
+        
+        // Mostrar loading
+        toast.loading("Enviando correo...", { id: "sendingEmail" });
+        
+        try {
+          // Obtener el contenido del resumen
+          let summaryContent = "";
+          
+          try {
+            const summaryResponse = await fetch(files.summary!.URL);
+            if (summaryResponse.ok) {
+              summaryContent = await summaryResponse.text();
+            } else {
+              throw new Error("No se pudo obtener el contenido del resumen");
+            }
+          } catch (error) {
+            console.error("Error al obtener el resumen:", error);
+            toast.error("Error al obtener el contenido del resumen", { id: "sendingEmail" });
+            return;
+          }
+          
+          // Obtener el nombre del archivo
+          const fileName = files.audio?.Key.split("/").pop() || files.transcript?.Key.split("/").pop() || "archivo";
+          
+          // Enviar correo
+          const response = await fetch("/api/send-email", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              to: defaultEmail,
+              subject: `Resumen: ${fileName}`,
+              summary: summaryContent,
+              fileTitle: fileName
+            }),
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok) {
+            throw new Error(data.message || "Error al enviar el correo");
+          }
+          
+          toast.success("Correo enviado exitosamente", { id: "sendingEmail" });
+        } catch (error) {
+          console.error("Error al enviar el correo:", error);
+          toast.error(
+            error instanceof Error ? error.message : "Error al enviar el correo", 
+            { id: "sendingEmail" }
+          );
+        }
+      }}
+      className="px-3 py-1.5 sm:px-4 sm:py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+      <span>Enviar por Email</span>
+    </button>
+  </>
+)}
                       </div>
                     </li>
                   ))}
@@ -553,6 +848,11 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
           )}
         </section>
       </main>
+      <SettingsModal 
+      isOpen={settingsModalOpen}
+      onClose={() => setSettingsModalOpen(false)}
+      />
     </div>
+
   );
 }
