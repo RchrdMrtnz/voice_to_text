@@ -88,7 +88,7 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
               />
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              Este correo se usará para enviar automáticamente los resúmenes cuando presiones el botón "Enviar".
+              Este correo se usará para enviar automáticamente los resúmenes cuando presiones el botón &quot;Enviar&quot;.
             </p>
           </div>
 
