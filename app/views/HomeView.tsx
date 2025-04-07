@@ -12,12 +12,14 @@ const AudioRecorder = dynamic(() => import("./AudioRecorder"), {
 const EmailModal = dynamic(() => import("./EmailView"), {
   ssr: false,
 });
+
 interface UploadedAudio {
   name: string;
   status: "Pendiente" | "Procesando" | "Completado" | "Error al procesar";
   transcriptLink?: string;
   audioLink?: string;
   summary?: string;
+  summaryUrl?: string;
 }
 
 interface S3File {
@@ -47,6 +49,7 @@ export default function MicrophoneComponent() {
   const [showExitModal, setShowExitModal] = useState(false);
   const [s3Files, setS3Files] = useState<S3File[]>([]);
   const [groupedFiles, setGroupedFiles] = useState<Record<string, GroupedFile>>({});
+  const [generatingSummaries, setGeneratingSummaries] = useState<Record<string, boolean>>({});
   const [summary, setSummary] = useState<{ mensaje: string; resumen: string; resumen_url: string; resumen_s3_key: string } | null>(null);
   const [expandedSummaries, setExpandedSummaries] = useState<Record<string, boolean>>({});
   const [summaryModal, setSummaryModal] = useState<SummaryModalState>({ open: false, content: '', title: '' });
@@ -207,53 +210,69 @@ const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
     }
   };
 
-  // Generar resumen
-  const handleGenerateSummary = async (s3Key: string) => {
-    try {
-      setProcessingMessage("Generando resumen...");
-      const summaryData = await generateSummary(s3Key);
-      
-      // Extraer el nombre del archivo del key de S3
-      const originalName = s3Key.split('/').pop() || 'resumen';
-      const downloadName = `resumen-${originalName.split('_').slice(-2).join('_')}`;
-      
-      // Descargar automáticamente
-      await handleDownloadFile(summaryData.resumen_url, downloadName);
-      
-      // Actualizar groupedFiles con el nuevo summary
-      setGroupedFiles(prevGroupedFiles => {
-        const updatedGroupedFiles = { ...prevGroupedFiles };
-        
-        // Encontrar el grupo que contiene el transcript con este s3Key
-        for (const [key, group] of Object.entries(updatedGroupedFiles)) {
-          if (group.transcript?.Key === s3Key) {
-            updatedGroupedFiles[key] = {
-              ...group,
-              summary: {
-                Key: summaryData.resumen_s3_key,
-                URL: summaryData.resumen_url,
-                Size: 0, // Puedes ajustar esto si tienes el tamaño
-                LastModified: new Date().toISOString(),
-                ContentType: 'text/plain'
-              }
-            };
-            break;
-          }
-        }
-        
-        return updatedGroupedFiles;
-      });
-      
-      setProcessingMessage(null);
-      toast.success("Resumen descargado");
-      
-    } catch (error) {
-      console.error("Error al generar el resumen:", error);
-      setProcessingMessage(null);
-      toast.error("Error al generar el resumen");
-    }
-  };
+// Generar resumen
+const handleGenerateSummary = async (s3Key: string, fileId: string) => {
+  try {
+    // 1. Mostrar estado de carga
+    setGeneratingSummaries(prev => ({ ...prev, [fileId]: true }));
+    setProcessingMessage("Generando resumen...");
 
+    // 2. Llamar al API para generar el resumen
+    const summaryData = await generateSummary(s3Key);
+    
+    // 3. Preparar nombre para descarga
+    const originalName = s3Key.split('/').pop() || 'resumen';
+    const downloadName = `resumen-${originalName.split('_').slice(-2).join('_')}`;
+    
+    // 4. Descargar automáticamente
+    await handleDownloadFile(summaryData.resumen_url, downloadName);
+    
+    // 5. Actualizar estado de groupedFiles (para la pestaña "Todos los archivos")
+    setGroupedFiles(prevGroupedFiles => {
+      const updatedGroupedFiles = { ...prevGroupedFiles };
+      
+      for (const [key, group] of Object.entries(updatedGroupedFiles)) {
+        if (group.transcript?.Key === s3Key) {
+          updatedGroupedFiles[key] = {
+            ...group,
+            summary: {
+              Key: summaryData.resumen_s3_key,
+              URL: summaryData.resumen_url,
+              Size: 0,
+              LastModified: new Date().toISOString(),
+              ContentType: 'text/plain'
+            }
+          };
+          break;
+        }
+      }
+      
+      return updatedGroupedFiles;
+    });
+    
+    // 6. Actualizar estado de uploadedAudios (para la pestaña "Subidos recientemente")
+    setUploadedAudios(prev => prev.map(audio => 
+      audio.name === fileId ? { 
+        ...audio, 
+        summary: summaryData.resumen,
+        summaryUrl: summaryData.resumen_url
+      } : audio
+    ));
+    
+    // 7. Notificación de éxito
+    toast.success("Resumen generado y descargado");
+    
+  } catch (error) {
+    // 8. Manejo de errores
+    console.error("Error al generar el resumen:", error);
+    toast.error("Error al generar el resumen");
+    
+  } finally {
+    // 9. Limpiar estados de carga
+    setGeneratingSummaries(prev => ({ ...prev, [fileId]: false }));
+    setProcessingMessage(null);
+  }
+};
   // Alternar visibilidad de resumen
   const toggleSummary = (id: string) => {
     setExpandedSummaries(prev => ({ ...prev, [id]: !prev[id] }));
@@ -584,72 +603,94 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                           )}
 
                           {audio.status === "Completado" && audio.transcriptLink && (
-                            <button
-                              onClick={() => {
-                                const s3Key = audio.transcriptLink?.split('amazonaws.com/')[1] || '';
-                                handleGenerateSummary(s3Key);
-                              }}
-                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                              </svg>
-                              <span>Generar Resumen</span>
-                            </button>
-                          )}
-                          
-                          {audio.summary && (
-                            <button
-                              onClick={async () => {
-                                // Verificar si hay un correo predeterminado configurado
-                                const defaultEmail = localStorage.getItem("defaultEmail");
-                                
-                                if (!defaultEmail) {
-                                  toast.error("Necesitas configurar un correo predeterminado en la sección de configuración");
-                                  setSettingsModalOpen(true); // Abre el modal de configuración para que agreguen el correo
-                                  return;
-                                }
-                                
-                                // Mostrar loading
-                                toast.loading("Enviando correo...", { id: "sendingEmail" });
-                                
-                                try {
-                                  const response = await fetch("/api/send-email", {
-                                    method: "POST",
-                                    headers: {
-                                      "Content-Type": "application/json",
-                                    },
-                                    body: JSON.stringify({
-                                      to: defaultEmail,
-                                      subject: `Resumen: ${audio.name}`,
-                                      summary: audio.summary,
-                                      fileTitle: audio.name
-                                    }),
-                                  });
-                                  
-                                  const data = await response.json();
-                                  
-                                  if (!response.ok) {
-                                    throw new Error(data.message || "Error al enviar el correo");
-                                  }
-                                  
-                                  toast.success("Correo enviado exitosamente", { id: "sendingEmail" });
-                                } catch (error) {
-                                  console.error("Error al enviar el correo:", error);
-                                  toast.error(
-                                    error instanceof Error ? error.message : "Error al enviar el correo", 
-                                    { id: "sendingEmail" }
-                                  );
-                                }
-                              }}
-                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                              </svg>
-                              <span>Enviar por Email</span>
-                            </button>
-                          )}
+                            <div className="flex flex-wrap gap-2">
+                              {/* Botón Descargar TXT */}
+                              <button
+                                onClick={() => handleDownloadFile(audio.transcriptLink!, `${audio.name}.txt`)}
+                                className="px-3 py-1.5 sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-blue-100"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                <span>Descargar TXT</span>
+                              </button>
+
+                              {/* Botón Generar Resumen */}
+                              {generatingSummaries[audio.name] ? (
+                                <div className="flex items-center gap-2 text-sm text-blue-600 px-4 py-2">
+                                  <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                  <span>Generando...</span>
+                                </div>
+                              ) : !audio.summary ? (
+                                <button
+                                  onClick={() => {
+                                    const s3Key = audio.transcriptLink?.split('amazonaws.com/')[1] || '';
+                                    handleGenerateSummary(s3Key, audio.name);
+                                  }}
+                                  className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                  </svg>
+                                  <span>Generar Resumen</span>
+                                </button>
+                              ) : null}
+
+                              {/* Botón Enviar por Email (solo cuando hay resumen) */}
+                              {audio.summary && (
+                                <button
+                                  onClick={async () => {
+                                    const defaultEmail = localStorage.getItem("defaultEmail") || "orianamendez.work@gmail.com";
+                                    if (!defaultEmail) {
+                                      toast.error("Configura un correo predeterminado en ajustes");
+                                      setSettingsModalOpen(true);
+                                      return;
+                                    }
+
+                                    toast.loading("Enviando correo...", { id: "emailToast" });
+                                    
+                                    try {
+                                      const response = await fetch("/api/send-email", {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          to: defaultEmail,
+                                          subject: `Resumen: ${audio.name}`,
+                                          summary: audio.summary,
+                                          fileTitle: audio.name
+                                        }),
+                                      });
+
+                                      const data = await response.json();
+                                      
+                                      if (!response.ok) {
+                                        throw new Error(data.message || "Error al enviar el correo");
+                                      }
+
+                                      toast.success("Correo enviado exitosamente", { id: "emailToast" });
+                                    } catch (error) {
+                                      console.error("Error al enviar el correo:", error);
+                                      toast.error(
+                                        error instanceof Error ? error.message : "Error al enviar el correo", 
+                                        { id: "emailToast" }
+                                      );
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 sm:px-4 sm:py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                  </svg>
+                                  <span>Enviar por Email</span>
+                                </button>
+                              )}
+                            </div>
+)}
                         </div>
                       </div>
                     </li>
@@ -697,7 +738,21 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                 </div>
               ) : (
                 <ul className="space-y-4">
-                  {filteredGroupedFiles.map((files) => (
+                  {[...filteredGroupedFiles].sort((a, b) => {
+                    // Obtener las fechas de los archivos
+                    const dateA = new Date(
+                      a.audio?.LastModified || 
+                      a.transcript?.LastModified || 
+                      Date.now()
+                    );
+                    
+                    const dateB = new Date(
+                      b.audio?.LastModified || 
+                      b.transcript?.LastModified || 
+                      Date.now()
+                    );
+                    return dateB.getTime() - dateA.getTime();   
+                  }).map((files) => (
                     <li key={files.id} className="p-4 sm:p-5 bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
                       <div className="w-full flex justify-between items-center mb-3">
                         <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded">
@@ -745,7 +800,7 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                         
                         {files.transcript && !files.summary && (
                           <button
-                            onClick={() => handleGenerateSummary(files.transcript!.Key)}
+                            onClick={() => handleGenerateSummary(files.transcript!.Key, files.id || files.transcript!.Key)}
                             className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -756,89 +811,79 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                         )}
                         
                         {files.summary && (
-  <>
-    <button
-      onClick={() => handleDownloadFile(files.summary!.URL, files.summary!.Key.split("/").pop()!)}
-      className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h7" />
-      </svg>
-      <span>Ver Resumen</span>
-    </button>
-    
-    <button
-      onClick={async () => {
-        // Verificar si hay un correo predeterminado configurado
-        const defaultEmail = localStorage.getItem("defaultEmail");
-        
-        if (!defaultEmail) {
-          toast.error("Necesitas configurar un correo predeterminado en la sección de configuración");
-          setSettingsModalOpen(true);
-          return;
-        }
-        
-        // Mostrar loading
-        toast.loading("Enviando correo...", { id: "sendingEmail" });
-        
-        try {
-          // Obtener el contenido del resumen
-          let summaryContent = "";
-          
-          try {
-            const summaryResponse = await fetch(files.summary!.URL);
-            if (summaryResponse.ok) {
-              summaryContent = await summaryResponse.text();
-            } else {
-              throw new Error("No se pudo obtener el contenido del resumen");
-            }
-          } catch (error) {
-            console.error("Error al obtener el resumen:", error);
-            toast.error("Error al obtener el contenido del resumen", { id: "sendingEmail" });
-            return;
-          }
-          
-          // Obtener el nombre del archivo
-          const fileName = files.audio?.Key.split("/").pop() || files.transcript?.Key.split("/").pop() || "archivo";
-          
-          // Enviar correo
-          const response = await fetch("/api/send-email", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              to: defaultEmail,
-              subject: `Resumen: ${fileName}`,
-              summary: summaryContent,
-              fileTitle: fileName
-            }),
-          });
-          
-          const data = await response.json();
-          
-          if (!response.ok) {
-            throw new Error(data.message || "Error al enviar el correo");
-          }
-          
-          toast.success("Correo enviado exitosamente", { id: "sendingEmail" });
-        } catch (error) {
-          console.error("Error al enviar el correo:", error);
-          toast.error(
-            error instanceof Error ? error.message : "Error al enviar el correo", 
-            { id: "sendingEmail" }
-          );
-        }
-      }}
-      className="px-3 py-1.5 sm:px-4 sm:py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-      </svg>
-      <span>Enviar por Email</span>
-    </button>
-  </>
-)}
+                        <>
+                          <button
+                            onClick={async () => {
+                              // Verificar si hay un correo predeterminado configurado
+                              const defaultEmail = localStorage.getItem("defaultEmail");
+                              
+                              if (!defaultEmail) {
+                                toast.error("Necesitas configurar un correo predeterminado en la sección de configuración");
+                                setSettingsModalOpen(true);
+                                return;
+                              }
+                              
+                              // Mostrar loading
+                              toast.loading("Enviando correo...", { id: "sendingEmail" });
+                              
+                              try {
+                                // Obtener el contenido del resumen
+                                let summaryContent = "";
+                                
+                                try {
+                                  const summaryResponse = await fetch(files.summary!.URL);
+                                  if (summaryResponse.ok) {
+                                    summaryContent = await summaryResponse.text();
+                                  } else {
+                                    throw new Error("No se pudo obtener el contenido del resumen");
+                                  }
+                                } catch (error) {
+                                  console.error("Error al obtener el resumen:", error);
+                                  toast.error("Error al obtener el contenido del resumen", { id: "sendingEmail" });
+                                  return;
+                                }
+                                
+                                // Obtener el nombre del archivo
+                                const fileName = files.audio?.Key.split("/").pop() || files.transcript?.Key.split("/").pop() || "archivo";
+                                
+                                // Enviar correo
+                                const response = await fetch("/api/send-email", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    to: defaultEmail,
+                                    subject: `Resumen: ${fileName}`,
+                                    summary: summaryContent,
+                                    fileTitle: fileName
+                                  }),
+                                });
+                                
+                                const data = await response.json();
+                                
+                                if (!response.ok) {
+                                  throw new Error(data.message || "Error al enviar el correo");
+                                }
+                                
+                                toast.success("Correo enviado exitosamente", { id: "sendingEmail" });
+                              } catch (error) {
+                                console.error("Error al enviar el correo:", error);
+                                toast.error(
+                                  error instanceof Error ? error.message : "Error al enviar el correo", 
+                                  { id: "sendingEmail" }
+                                );
+                              }
+                            }}
+                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                            <span>Enviar por Email</span>
+                          </button>
+                        </>
+                      )}
                       </div>
                     </li>
                   ))}
