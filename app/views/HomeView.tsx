@@ -604,18 +604,6 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
 
                         <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-start sm:justify-end">
                           {audio.status === "Completado" && audio.transcriptLink && (
-                            <button
-                              onClick={() => handleDownloadFile(audio.transcriptLink!, `${audio.name}.txt`)}
-                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-blue-100"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                              <span>Descargar TXT</span>
-                            </button>
-                          )}
-
-                          {audio.status === "Completado" && audio.transcriptLink && (
                             <div className="flex flex-wrap gap-2">
                               {/* Botón Descargar TXT */}
                               <button

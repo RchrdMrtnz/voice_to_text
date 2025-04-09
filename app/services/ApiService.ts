@@ -10,6 +10,7 @@ interface UploadedAudio {
 }
 
 // Función para verificar el estado de la transcripción
+// Función para verificar el estado de la transcripción
 const checkTranscriptionStatus = async (
   taskId: string,
   setUploadedAudios: Dispatch<SetStateAction<UploadedAudio[]>>,
@@ -50,6 +51,10 @@ const checkTranscriptionStatus = async (
             : audio
         )
       );
+      
+      // Limpiar el mensaje de procesamiento después de 3 segundos
+      setTimeout(() => setProcessingMessage(null), 3000);
+      
       return true; // Indica que la transcripción está completa
     } else if (statusData.state === "FAILED") {
       setProcessingMessage("Error en la transcripción"); // Mensaje de error
@@ -58,6 +63,10 @@ const checkTranscriptionStatus = async (
           audio.name === fileName ? { ...audio, status: "Error al procesar" } : audio
         )
       );
+      
+      // Limpiar el mensaje de error después de 3 segundos
+      setTimeout(() => setProcessingMessage(null), 3000);
+      
       return true; // Indica que la transcripción falló
     }
 
@@ -75,6 +84,10 @@ const checkTranscriptionStatus = async (
         audio.name === fileName ? { ...audio, status: "Error al procesar" } : audio
       )
     );
+    
+    // Limpiar el mensaje de error después de 3 segundos
+    setTimeout(() => setProcessingMessage(null), 3000);
+    
     return true; // Indica que hubo un error
   }
 };
