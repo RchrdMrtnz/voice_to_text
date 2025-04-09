@@ -76,36 +76,49 @@ export default function MicrophoneComponent() {
 const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
   return files.reduce((acc, file) => {
     const fileName = file.Key.split("/").pop() || "";
+    const lowerFileName = fileName.toLowerCase();
+    const lowerKey = file.Key.toLowerCase();
     
-    let fileId = '';
-    const parts = fileName.split('_');
-    
-    if (fileName.match(/^\d+_.+\.(wav|mp3|m4a|ogg|flac)$/)) {
-      fileId = parts[0];
-    }
-    else if (fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_\d+_.+\.txt$/)) {
-      fileId = parts[1];
-    }
-    else if (fileName.includes('resumen')) {
-      const resumenParts = fileName.split('_resumen')[0].split('_');
-      fileId = resumenParts[resumenParts.length - 1];
-    }
-    else {
-      fileId = fileName.split('_')[0];
-    }
+    // Extraer el ID según el tipo de archivo
+    const extractFileId = () => {
+      // Caso 1: Archivos de audio (ID_TIMESTAMP_NOMBRE.ext)
+      const audioMatch = fileName.match(/^(\d+)_.+\.(wav|mp3|m4a|ogg|flac)$/i);
+      if (audioMatch) return audioMatch[1];
+      
+      // Caso 2: Transcripciones/Resúmenes (UUID_ID_TIMESTAMP_NOMBRE.txt)
+      const textMatch = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(\d+)_.+\.txt$/i);
+      if (textMatch) return textMatch[1];
+      
+      // Caso 3: Archivos con 'resumen' en el nombre
+      if (lowerFileName.includes('resumen')) {
+        const resumenParts = fileName.split('_resumen')[0].split('_');
+        return resumenParts[resumenParts.length - 1];
+      }
+      
+      // Caso por defecto: primer segmento del nombre
+      return fileName.split('_')[0];
+    };
 
+    const fileId = extractFileId();
+    
+    // Inicializar el grupo si no existe
     if (!acc[fileId]) {
       acc[fileId] = { 
         audio: null, 
-        transcript: null
+        transcript: null,
+        summary: null
       };
     }
 
-    const audioExtensions = [".wav", ".mp3", ".m4a", ".ogg", ".flac"];
-    if (audioExtensions.some(ext => fileName.toLowerCase().endsWith(ext))) {
+    // Clasificar el archivo
+    const isAudio = /\.(wav|mp3|m4a|ogg|flac)$/i.test(fileName);
+    const isText = /\.txt$/i.test(fileName);
+    const isResume = lowerKey.includes('resume/') || lowerFileName.includes('resumen');
+
+    if (isAudio) {
       acc[fileId].audio = file;
-    } else if (fileName.toLowerCase().endsWith(".txt")) {
-      if (fileName.toLowerCase().includes('resumen') || file.Key.toLowerCase().includes('resumen')) {
+    } else if (isText) {
+      if (isResume) {
         acc[fileId].summary = file;
       } else {
         acc[fileId].transcript = file;
@@ -798,7 +811,72 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                           </button>
                         )}
                         
-                        {files.transcript && !files.summary && (
+                        {/* Mostrar botones de resumen según si existe o no */}
+                        {files.summary ? (
+                          <>
+                            <button
+                              onClick={() => handleDownloadFile(files.summary!.URL, files.summary!.Key.split("/").pop()!)}
+                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                              </svg>
+                              <span>Descargar Resumen</span>
+                            </button>
+                            
+                            <button
+                              onClick={async () => {
+                                const defaultEmail = localStorage.getItem("defaultEmail");
+                                
+                                if (!defaultEmail) {
+                                  toast.error("Configura un correo predeterminado en ajustes");
+                                  setSettingsModalOpen(true);
+                                  return;
+                                }
+                                
+                                toast.loading("Enviando correo...", { id: "emailToast" });
+                                
+                                try {
+                                  const summaryResponse = await fetch(files.summary!.URL);
+                                  const summaryContent = await summaryResponse.text();
+                                  
+                                  const fileName = files.audio?.Key.split("/").pop() || 
+                                                files.transcript?.Key.split("/").pop() || 
+                                                "archivo";
+                                  
+                                  const response = await fetch("/api/send-email", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      to: defaultEmail,
+                                      subject: `Resumen: ${fileName}`,
+                                      summary: summaryContent,
+                                      fileTitle: fileName
+                                    }),
+                                  });
+
+                                  if (!response.ok) {
+                                    throw new Error(await response.text());
+                                  }
+
+                                  toast.success("Correo enviado exitosamente", { id: "emailToast" });
+                                } catch (error) {
+                                  console.error("Error al enviar el correo:", error);
+                                  toast.error(
+                                    error instanceof Error ? error.message : "Error al enviar el correo", 
+                                    { id: "emailToast" }
+                                  );
+                                }
+                              }}
+                              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-indigo-100"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                              </svg>
+                              <span>Enviar por Email</span>
+                            </button>
+                          </>
+                        ) : files.transcript && (
                           <button
                             onClick={() => handleGenerateSummary(files.transcript!.Key, files.id || files.transcript!.Key)}
                             className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-purple-100"
@@ -809,81 +887,6 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                             <span>Generar Resumen</span>
                           </button>
                         )}
-                        
-                        {files.summary && (
-                        <>
-                          <button
-                            onClick={async () => {
-                              // Verificar si hay un correo predeterminado configurado
-                              const defaultEmail = localStorage.getItem("defaultEmail");
-                              
-                              if (!defaultEmail) {
-                                toast.error("Necesitas configurar un correo predeterminado en la sección de configuración");
-                                setSettingsModalOpen(true);
-                                return;
-                              }
-                              
-                              // Mostrar loading
-                              toast.loading("Enviando correo...", { id: "sendingEmail" });
-                              
-                              try {
-                                // Obtener el contenido del resumen
-                                let summaryContent = "";
-                                
-                                try {
-                                  const summaryResponse = await fetch(files.summary!.URL);
-                                  if (summaryResponse.ok) {
-                                    summaryContent = await summaryResponse.text();
-                                  } else {
-                                    throw new Error("No se pudo obtener el contenido del resumen");
-                                  }
-                                } catch (error) {
-                                  console.error("Error al obtener el resumen:", error);
-                                  toast.error("Error al obtener el contenido del resumen", { id: "sendingEmail" });
-                                  return;
-                                }
-                                
-                                // Obtener el nombre del archivo
-                                const fileName = files.audio?.Key.split("/").pop() || files.transcript?.Key.split("/").pop() || "archivo";
-                                
-                                // Enviar correo
-                                const response = await fetch("/api/send-email", {
-                                  method: "POST",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({
-                                    to: defaultEmail,
-                                    subject: `Resumen: ${fileName}`,
-                                    summary: summaryContent,
-                                    fileTitle: fileName
-                                  }),
-                                });
-                                
-                                const data = await response.json();
-                                
-                                if (!response.ok) {
-                                  throw new Error(data.message || "Error al enviar el correo");
-                                }
-                                
-                                toast.success("Correo enviado exitosamente", { id: "sendingEmail" });
-                              } catch (error) {
-                                console.error("Error al enviar el correo:", error);
-                                toast.error(
-                                  error instanceof Error ? error.message : "Error al enviar el correo", 
-                                  { id: "sendingEmail" }
-                                );
-                              }
-                            }}
-                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors duration-200 border border-green-100"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                            </svg>
-                            <span>Enviar por Email</span>
-                          </button>
-                        </>
-                      )}
                       </div>
                     </li>
                   ))}
