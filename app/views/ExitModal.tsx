@@ -1,3 +1,4 @@
+// ExitModal.tsx modificado para solo aparecer durante la grabación
 import { useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 
@@ -5,9 +6,10 @@ interface ExitModalProps {
   show: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  isRecording: boolean; // Prop para saber si hay grabación en curso
 }
 
-const ExitModal = ({ show, onClose, onConfirm }: ExitModalProps) => {
+const ExitModal = ({ show, onClose, onConfirm, isRecording }: ExitModalProps) => {
   const [isBrowser, setIsBrowser] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
 
@@ -53,7 +55,10 @@ const ExitModal = ({ show, onClose, onConfirm }: ExitModalProps) => {
     }, 300); // Duración de la animación
   };
 
-  const modalContent = show ? (
+  // ✅ MODIFICADO: Solo mostrar el modal si se está grabando Y show es true
+  const shouldShowModal = show && isRecording;
+
+  const modalContent = shouldShowModal ? (
     <div
       role="dialog"
       aria-modal="true"
@@ -78,36 +83,49 @@ const ExitModal = ({ show, onClose, onConfirm }: ExitModalProps) => {
             </svg>
           </div>
           <h2 id="exit-modal-title" className="text-xl font-bold text-red-700">
-            Advertencia
+            ⚠️ Grabación en Curso
           </h2>
         </div>
         
         {/* Contenido */}
         <div className="px-6 py-6">
-          <p id="exit-modal-description" className="text-gray-700 text-base leading-relaxed mb-2">
-            Tienes procesos activos en este momento. Si sales ahora, perderás todo tu progreso.
+          <p id="exit-modal-description" className="text-gray-700 text-base leading-relaxed mb-4">
+            <strong>Tienes una grabación activa en este momento.</strong>
           </p>
-          <p className="text-gray-600 text-sm">
-            Los archivos que están siendo procesados no se guardarán.
+          <p className="text-gray-600 text-sm mb-3">
+            Si sales o cierras esta página ahora:
           </p>
+          <ul className="text-gray-600 text-sm space-y-1 mb-4 pl-4">
+            <li>• Se perderá todo el audio grabado hasta ahora</li>
+            <li>• No se guardará ningún progreso de la grabación</li>
+            <li>• Tendrás que comenzar desde cero</li>
+          </ul>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-amber-800 text-sm font-medium">
+              💡 <strong>Recomendación:</strong> Detén la grabación primero para asegurar que se guarde correctamente.
+            </p>
+          </div>
         </div>
         
         {/* Pie del modal */}
         <div className="px-6 py-4 bg-gray-50 rounded-b-xl border-t border-gray-100 flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
           <button
             onClick={handleClose}
-            className="px-4 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg transition-colors w-full sm:w-auto text-sm focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+            className="px-6 py-2.5 bg-green-100 hover:bg-green-200 text-green-800 font-medium rounded-lg transition-colors w-full sm:w-auto text-sm focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2 border border-green-200"
           >
-            Continuar el proceso
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Continuar grabando
           </button>
           <button
             onClick={handleConfirm}
-            className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors w-full sm:w-auto text-sm flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+            className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors w-full sm:w-auto text-sm flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
-            Salir de todos modos
+            Salir y perder grabación
           </button>
         </div>
       </article>

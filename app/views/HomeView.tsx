@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import ExitModal from './ExitModal';
 import dynamic from "next/dynamic";
 import SettingsModal from './SettingsModal';
+import { processStreamingRecording } from '../services/AudioStreamService';
+
 const AudioRecorder = dynamic(() => import("./AudioRecorder"), {
   ssr: false,
 });
@@ -39,8 +41,8 @@ interface SummaryModalState {
 interface GroupedFile {
   audio: S3File | null;
   transcript: S3File | null;
-  summary?: S3File | null;  // Make summary optional
-  id?: string;              // Make id optional
+  summary?: S3File | null;
+  id?: string;
 }
 
 export default function MicrophoneComponent() {
@@ -61,8 +63,11 @@ export default function MicrophoneComponent() {
     fileTitle: '',
     transcription: ''
   });
-  
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  
+  // ✅ NUEVO ESTADO: Para rastrear si se está grabando
+  const [isRecording, setIsRecording] = useState(false);
+
   const openEmailModal = (content: string, fileTitle: string, transcription?: string) => {
     setEmailModal({
       isOpen: true,
@@ -71,63 +76,63 @@ export default function MicrophoneComponent() {
       transcription: transcription || ''
     });
   };
-  // Función para agrupar archivos de S3
-// Función para agrupar archivos de S3 - Versión mejorada
-const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
-  return files.reduce((acc, file) => {
-    const fileName = file.Key.split("/").pop() || "";
-    const lowerFileName = fileName.toLowerCase();
-    const lowerKey = file.Key.toLowerCase();
-    
-    // Extraer el ID según el tipo de archivo
-    const extractFileId = () => {
-      // Caso 1: Archivos de audio (ID_TIMESTAMP_NOMBRE.ext)
-      const audioMatch = fileName.match(/^(\d+)_.+\.(wav|mp3|m4a|ogg|flac)$/i);
-      if (audioMatch) return audioMatch[1];
-      
-      // Caso 2: Transcripciones/Resúmenes (UUID_ID_TIMESTAMP_NOMBRE.txt)
-      const textMatch = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(\d+)_.+\.txt$/i);
-      if (textMatch) return textMatch[1];
-      
-      // Caso 3: Archivos con 'resumen' en el nombre
-      if (lowerFileName.includes('resumen')) {
-        const resumenParts = fileName.split('_resumen')[0].split('_');
-        return resumenParts[resumenParts.length - 1];
-      }
-      
-      // Caso por defecto: primer segmento del nombre
-      return fileName.split('_')[0];
-    };
 
-    const fileId = extractFileId();
-    
-    // Inicializar el grupo si no existe
-    if (!acc[fileId]) {
-      acc[fileId] = { 
-        audio: null, 
-        transcript: null,
-        summary: null
+  // Función para agrupar archivos de S3 - Versión mejorada
+  const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
+    return files.reduce((acc, file) => {
+      const fileName = file.Key.split("/").pop() || "";
+      const lowerFileName = fileName.toLowerCase();
+      const lowerKey = file.Key.toLowerCase();
+      
+      // Extraer el ID según el tipo de archivo
+      const extractFileId = () => {
+        // Caso 1: Archivos de audio (ID_TIMESTAMP_NOMBRE.ext)
+        const audioMatch = fileName.match(/^(\d+)_.+\.(wav|mp3|m4a|ogg|flac)$/i);
+        if (audioMatch) return audioMatch[1];
+        
+        // Caso 2: Transcripciones/Resúmenes (UUID_ID_TIMESTAMP_NOMBRE.txt)
+        const textMatch = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(\d+)_.+\.txt$/i);
+        if (textMatch) return textMatch[1];
+        
+        // Caso 3: Archivos con 'resumen' en el nombre
+        if (lowerFileName.includes('resumen')) {
+          const resumenParts = fileName.split('_resumen')[0].split('_');
+          return resumenParts[resumenParts.length - 1];
+        }
+        
+        // Caso por defecto: primer segmento del nombre
+        return fileName.split('_')[0];
       };
-    }
 
-    // Clasificar el archivo
-    const isAudio = /\.(wav|mp3|m4a|ogg|flac)$/i.test(fileName);
-    const isText = /\.txt$/i.test(fileName);
-    const isResume = lowerKey.includes('resume/') || lowerFileName.includes('resumen');
-
-    if (isAudio) {
-      acc[fileId].audio = file;
-    } else if (isText) {
-      if (isResume) {
-        acc[fileId].summary = file;
-      } else {
-        acc[fileId].transcript = file;
+      const fileId = extractFileId();
+      
+      // Inicializar el grupo si no existe
+      if (!acc[fileId]) {
+        acc[fileId] = { 
+          audio: null, 
+          transcript: null,
+          summary: null
+        };
       }
-    }
 
-    return acc;
-  }, {} as Record<string, GroupedFile>);
-};
+      // Clasificar el archivo
+      const isAudio = /\.(wav|mp3|m4a|ogg|flac)$/i.test(fileName);
+      const isText = /\.txt$/i.test(fileName);
+      const isResume = lowerKey.includes('resume/') || lowerFileName.includes('resumen');
+
+      if (isAudio) {
+        acc[fileId].audio = file;
+      } else if (isText) {
+        if (isResume) {
+          acc[fileId].summary = file;
+        } else {
+          acc[fileId].transcript = file;
+        }
+      }
+
+      return acc;
+    }, {} as Record<string, GroupedFile>);
+  };
 
   // Obtener archivos de S3
   useEffect(() => {
@@ -144,28 +149,43 @@ const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
     fetchFiles();
   }, []);
 
-  // Manejar eventos de salida
+  // ✅ MODIFICADO: Manejar eventos de salida SOLO cuando se está grabando
   useEffect(() => {
     const handleExitAttempt = (event: Event) => {
-      event.preventDefault();
-      setShowExitModal(true);
-      return false;
+      // Solo mostrar el modal si se está grabando
+      if (isRecording) {
+        event.preventDefault();
+        setShowExitModal(true);
+        return false;
+      }
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
+      // Solo mostrar el modal si se está grabando y la página se oculta
+      if (document.visibilityState === "hidden" && isRecording) {
         setShowExitModal(true);
       }
     };
 
+    // ✅ AGREGADO: Manejar beforeunload para prevenir la salida durante grabación
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isRecording) {
+        event.preventDefault();
+        event.returnValue = 'Tienes una grabación en curso. ¿Estás seguro de que quieres salir?';
+        return event.returnValue;
+      }
+    };
+
     window.addEventListener("pagehide", handleExitAttempt);
+    window.addEventListener("beforeunload", handleBeforeUnload);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.removeEventListener("pagehide", handleExitAttempt);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [isRecording]); // ✅ Dependencia del estado isRecording
 
   // Subida de archivos
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,8 +218,11 @@ const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
     }
   };
 
-  // Manejar grabación detenida
+  // ✅ MODIFICADO: Manejar grabación detenida y actualizar estado
   const handleRecordingStop = async (audioBlob: Blob) => {
+    // Marcar que ya no se está grabando
+    setIsRecording(false);
+    
     const uniqueId = Date.now();
     const uniqueFileName = `${uniqueId}_recording.wav`;
 
@@ -223,69 +246,75 @@ const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
     }
   };
 
-// Generar resumen
-const handleGenerateSummary = async (s3Key: string, fileId: string) => {
-  try {
-    // 1. Mostrar estado de carga
-    setGeneratingSummaries(prev => ({ ...prev, [fileId]: true }));
-    setProcessingMessage("Generando resumen...");
+  // ✅ MODIFICADO: Manejar inicio de grabación
+  const handleRecordingStart = () => {
+    setIsRecording(true);
+  };
 
-    // 2. Llamar al API para generar el resumen
-    const summaryData = await generateSummary(s3Key);
-    
-    // 3. Preparar nombre para descarga
-    const originalName = s3Key.split('/').pop() || 'resumen';
-    const downloadName = `resumen-${originalName.split('_').slice(-2).join('_')}`;
-    
-    // 4. Descargar automáticamente
-    await handleDownloadFile(summaryData.resumen_url, downloadName);
-    
-    // 5. Actualizar estado de groupedFiles (para la pestaña "Todos los archivos")
-    setGroupedFiles(prevGroupedFiles => {
-      const updatedGroupedFiles = { ...prevGroupedFiles };
+  // Generar resumen
+  const handleGenerateSummary = async (s3Key: string, fileId: string) => {
+    try {
+      // 1. Mostrar estado de carga
+      setGeneratingSummaries(prev => ({ ...prev, [fileId]: true }));
+      setProcessingMessage("Generando resumen...");
+
+      // 2. Llamar al API para generar el resumen
+      const summaryData = await generateSummary(s3Key);
       
-      for (const [key, group] of Object.entries(updatedGroupedFiles)) {
-        if (group.transcript?.Key === s3Key) {
-          updatedGroupedFiles[key] = {
-            ...group,
-            summary: {
-              Key: summaryData.resumen_s3_key,
-              URL: summaryData.resumen_url,
-              Size: 0,
-              LastModified: new Date().toISOString(),
-              ContentType: 'text/plain'
-            }
-          };
-          break;
+      // 3. Preparar nombre para descarga
+      const originalName = s3Key.split('/').pop() || 'resumen';
+      const downloadName = `resumen-${originalName.split('_').slice(-2).join('_')}`;
+      
+      // 4. Descargar automáticamente
+      await handleDownloadFile(summaryData.resumen_url, downloadName);
+      
+      // 5. Actualizar estado de groupedFiles (para la pestaña "Todos los archivos")
+      setGroupedFiles(prevGroupedFiles => {
+        const updatedGroupedFiles = { ...prevGroupedFiles };
+        
+        for (const [key, group] of Object.entries(updatedGroupedFiles)) {
+          if (group.transcript?.Key === s3Key) {
+            updatedGroupedFiles[key] = {
+              ...group,
+              summary: {
+                Key: summaryData.resumen_s3_key,
+                URL: summaryData.resumen_url,
+                Size: 0,
+                LastModified: new Date().toISOString(),
+                ContentType: 'text/plain'
+              }
+            };
+            break;
+          }
         }
-      }
+        
+        return updatedGroupedFiles;
+      });
       
-      return updatedGroupedFiles;
-    });
-    
-    // 6. Actualizar estado de uploadedAudios (para la pestaña "Subidos recientemente")
-    setUploadedAudios(prev => prev.map(audio => 
-      audio.name === fileId ? { 
-        ...audio, 
-        summary: summaryData.resumen,
-        summaryUrl: summaryData.resumen_url
-      } : audio
-    ));
-    
-    // 7. Notificación de éxito
-    toast.success("Resumen generado y descargado");
-    
-  } catch (error) {
-    // 8. Manejo de errores
-    console.error("Error al generar el resumen:", error);
-    toast.error("Error al generar el resumen");
-    
-  } finally {
-    // 9. Limpiar estados de carga
-    setGeneratingSummaries(prev => ({ ...prev, [fileId]: false }));
-    setProcessingMessage(null);
-  }
-};
+      // 6. Actualizar estado de uploadedAudios (para la pestaña "Subidos recientemente")
+      setUploadedAudios(prev => prev.map(audio => 
+        audio.name === fileId ? { 
+          ...audio, 
+          summary: summaryData.resumen,
+          summaryUrl: summaryData.resumen_url
+        } : audio
+      ));
+      
+      // 7. Notificación de éxito
+      toast.success("Resumen generado y descargado");
+      
+    } catch (error) {
+      // 8. Manejo de errores
+      console.error("Error al generar el resumen:", error);
+      toast.error("Error al generar el resumen");
+      
+    } finally {
+      // 9. Limpiar estados de carga
+      setGeneratingSummaries(prev => ({ ...prev, [fileId]: false }));
+      setProcessingMessage(null);
+    }
+  };
+
   // Alternar visibilidad de resumen
   const toggleSummary = (id: string) => {
     setExpandedSummaries(prev => ({ ...prev, [id]: !prev[id] }));
@@ -332,21 +361,63 @@ const handleGenerateSummary = async (s3Key: string, fileId: string) => {
     (audio.summary && audio.summary.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // Filtrar archivos S3 agrupados
-// Filtrar archivos S3 agrupados (excluyendo los que solo tienen resumen)
-const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
-  // Excluir grupos que solo tienen resumen
-  if (files.summary && !files.audio && !files.transcript) {
-    return false;
-  }
-  
-  // Incluir solo los que coinciden con el término de búsqueda
-  return (
-    files.audio?.Key.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    files.transcript?.Key.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    files.summary?.Key.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-});
+  // Filtrar archivos S3 agrupados (excluyendo los que solo tienen resumen)
+  const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
+    // Excluir grupos que solo tienen resumen
+    if (files.summary && !files.audio && !files.transcript) {
+      return false;
+    }
+    
+    // Incluir solo los que coinciden con el término de búsqueda
+    return (
+      files.audio?.Key.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      files.transcript?.Key.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      files.summary?.Key.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
+
+  const handleStreamingRecordingComplete = async (sessionId: string, finalAudioKey: string) => {
+    try {
+      // ✅ AGREGADO: Marcar que ya no se está grabando
+      setIsRecording(false);
+      
+      // Cambiar a la pestaña de uploads para mostrar el progreso
+      setActiveTab('uploads');
+      
+      // Usar processStreamingRecording en lugar de processCompletedRecording
+      await processStreamingRecording(
+        sessionId,
+        finalAudioKey,
+        setUploadedAudios,
+        setProcessingMessage,
+        async () => {
+          // Función para actualizar la lista de archivos
+          try {
+            const files = await getFilesFromS3();
+            setS3Files(files);
+            setGroupedFiles(groupFiles(files));
+          } catch (error) {
+            console.error("Error al actualizar la lista de archivos:", error);
+            toast.error("Error al actualizar la lista de archivos");
+          }
+        }
+      );
+      
+      // Notificación de éxito
+      toast.success("Grabación procesada exitosamente");
+      
+    } catch (error) {
+      console.error("Error al procesar la grabación:", error);
+      toast.error("Error al procesar la grabación");
+    }
+  };
+
+  // ✅ MODIFICADO: Manejar confirmación del modal de salida
+  const handleExitConfirm = () => {
+    setIsRecording(false); // Detener el estado de grabación
+    setShowExitModal(false);
+    window.location.reload();
+  };
 
   // Componente Modal de Resumen
   const SummaryModal = () => (
@@ -387,43 +458,42 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full py-4 sm:py-10 bg-[#70D7D9]">
+      {/* ✅ MODIFICADO: Pasar el prop isRecording al ExitModal */}
       <ExitModal
         show={showExitModal}
         onClose={() => setShowExitModal(false)}
-        onConfirm={() => {
-          setShowExitModal(false);
-          window.location.reload();
-        }}
+        onConfirm={handleExitConfirm}
+        isRecording={isRecording}
       />
       
       <SummaryModal />
 
       <main className="bg-white rounded-xl w-full max-w-3xl shadow-lg flex flex-col mx-2 sm:mx-4">
-      <header className="w-full h-20 sm:h-24 rounded-t-xl flex items-center bg-gradient-to-r from-[#47CACC] to-[#3aa8a9] px-12 shadow-sm">
-        <div className="flex items-center justify-between w-full">
-          <div className="flex items-center">
-            <img
-              className="w-32 sm:w-40 h-auto object-contain"
-              src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png"
-              alt="Logo de Procencia"
-            />
+        <header className="w-full h-20 sm:h-24 rounded-t-xl flex items-center bg-gradient-to-r from-[#47CACC] to-[#3aa8a9] px-12 shadow-sm">
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center">
+              <img
+                className="w-32 sm:w-40 h-auto object-contain"
+                src="https://www.procencia.com/wp-content/uploads/2024/12/procencia.png"
+                alt="Logo de Procencia"
+              />
+            </div>
+            
+            <div className="flex items-center">
+              <button
+                onClick={() => setSettingsModalOpen(true)}
+                className="p-2.5 rounded-full hover:bg-white/20 focus:bg-white/30 active:bg-white/40 transition-all flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-white/50"
+                aria-label="Configuración"
+                title="Configuración"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+            </div>
           </div>
-          
-          <div className="flex items-center">
-            <button
-              onClick={() => setSettingsModalOpen(true)}
-              className="p-2.5 rounded-full hover:bg-white/20 focus:bg-white/30 active:bg-white/40 transition-all flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-white/50"
-              aria-label="Configuración"
-              title="Configuración"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </header>
+        </header>
 
         <section className="px-4 sm:px-6 py-6 sm:py-8 flex-grow bg-gray-50">
           <div className="max-w-4xl mx-auto">
@@ -436,7 +506,12 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
                 Grabador de Audio
               </h2>
               
-              <AudioRecorder onRecordingStop={handleRecordingStop} />
+              {/* ✅ MODIFICADO: Pasar callbacks para manejar el estado de grabación */}
+              <AudioRecorder 
+                onRecordingStop={handleStreamingRecordingComplete}
+                onRecordingStart={handleRecordingStart}
+                onRecordingStateChange={setIsRecording}
+              />
             </div>
 
             {/* Separador */}
@@ -520,6 +595,7 @@ const filteredGroupedFiles = Object.values(groupedFiles).filter(files => {
               </div>
             </div>
           </div>
+
 
           {activeTab === 'uploads' && (
             <article className="mt-6 sm:mt-8">

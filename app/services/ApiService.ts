@@ -140,7 +140,6 @@ export const uploadAudio = async (
 
     // Procesar la transcripción
     const fileNameKey = uploadData.file_info.Key.split("/").pop();
-    console.log("🔍 Iniciando transcripción...");
 
     const transcribeResponse = await fetch(
       `${backendUrl}/transcribe/${fileNameKey}?segment_duration=60`,
@@ -259,3 +258,4 @@ export const generateSummary = async (s3Key: string) => {
     throw error;
   }
 };
+
