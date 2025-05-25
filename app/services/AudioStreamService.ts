@@ -291,8 +291,9 @@ export const processCompletedRecording = async (
   }
 };
 
+
 /**
- * Procesa una grabación de streaming completa incluyendo transcripción
+ * Procesa una grabación de streaming completa - VERSIÓN CORREGIDA SIN DUPLICACIÓN
  * @param sessionId - ID de la sesión de grabación
  * @param finalAudioKey - Clave del archivo de audio final
  * @param setUploadedAudios - Función para actualizar la lista de audios
@@ -306,60 +307,67 @@ export const processStreamingRecording = async (
   setProcessingMessage: Dispatch<SetStateAction<string | null>>,
   updateFilesList: () => Promise<void>
 ) => {
+  console.log("🎬 processStreamingRecording iniciado:", { sessionId, finalAudioKey });
+  
   // Crear un nombre para el archivo basado en el ID de sesión
   const fileName = `${sessionId}_recording.mp3`;
   
-  // Añadir el audio a la lista de audios subidos con estado inicial "Pendiente"
-  setUploadedAudios(prev => [...prev, { 
-    name: fileName, 
-    status: "Pendiente"
-  }]);
-  
-  const controller = new AbortController();
-  const timeout = 900000; // 10 minutos en milisegundos
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-  
   try {
-    setProcessingMessage("Procesando grabación...");
+    setProcessingMessage("Finalizando grabación...");
     
-    // Actualizar el estado del archivo a "Procesando"
-    setUploadedAudios(prev => 
-      prev.map(audio => 
-        audio.name === fileName ? { ...audio, status: "Procesando" } : audio
-      )
-    );
+    // ✅ VERIFICAR: Solo agregar si no existe ya en la lista
+    setUploadedAudios(prev => {
+      const exists = prev.some(audio => audio.name === fileName);
+      if (exists) {
+        console.log("📋 Archivo ya existe en la lista, actualizando estado...");
+        return prev.map(audio => 
+          audio.name === fileName 
+            ? { ...audio, status: "Completado", audioLink: finalAudioKey }
+            : audio
+        );
+      } else {
+        console.log("📋 Agregando nuevo archivo a la lista...");
+        return [...prev, { 
+          name: fileName, 
+          status: "Completado",
+          audioLink: finalAudioKey
+        }];
+      }
+    });
     
-    // Actualizar lista de archivos
+    // Actualizar lista de archivos para mostrar el audio final
+    console.log("📁 Actualizando lista de archivos...");
     await updateFilesList();
     
-    // Extraer solo el nombre del archivo sin la ruta
-    const fileNameKey = finalAudioKey.split("/").pop();
+    setProcessingMessage("Grabación completada");
     
-    if (!fileNameKey) {
-      throw new Error("No se pudo determinar el nombre del archivo");
-    }
-        
-    // Iniciar la transcripción
-    const transcribeResponse = await fetch(
-      `${backendUrl}/transcribe/${fileNameKey}?segment_duration=60`,
-      { method: "POST", signal: controller.signal }
-    );
+    // ✅ NUEVO: Verificar si ya existe transcripción antes de iniciar nueva
+    console.log("🔍 Verificando si ya existe transcripción...");
     
-    clearTimeout(timeoutId);
+    // Esperar un poco para que el backend termine de procesar
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
-    if (!transcribeResponse.ok) {
-      throw new Error(`Error al obtener la transcripción: ${transcribeResponse.statusText}`);
-    }
-    
-    const transcribeData = await transcribeResponse.json();
-    setProcessingMessage("Procesando transcripción...");
-    
-    // Verificar el estado de la transcripción utilizando la función local
-    const taskId = transcribeData.task_id;
-    await checkTranscriptionStatus(taskId, setUploadedAudios, fileName, setProcessingMessage);
-    
-    // Actualizar lista de archivos nuevamente después de la transcripción
+    // Volver a actualizar la lista para capturar archivos generados por el backend
     await updateFilesList();
+    
+    // ✅ OPCIONAL: Solo transcribir si no existe transcripción
+    // Esto requiere verificar en S3 si ya existe el archivo de transcripción
+    const shouldTranscribe = await checkIfTranscriptionNeeded(finalAudioKey);
+    
+    if (shouldTranscribe) {
+      console.log("📝 Iniciando transcripción manual...");
+      await startManualTranscription(finalAudioKey, fileName, setUploadedAudios, setProcessingMessage);
+    } else {
+      console.log("✅ Transcripción ya existe, saltando...");
+      // Buscar la transcripción existente y actualizar el estado
+      await findExistingTranscription(fileName, setUploadedAudios);
+    }
+    
+    // Actualizar lista final
+    await updateFilesList();
+    
+    // Limpiar mensaje después de 3 segundos
+    setTimeout(() => setProcessingMessage(null), 3000);
     
   } catch (error) {
     console.error("🚨 Error al procesar la grabación:", error);
@@ -370,5 +378,131 @@ export const processStreamingRecording = async (
     );
     setProcessingMessage("Error al procesar la grabación");
     setTimeout(() => setProcessingMessage(null), 3000);
+  }
+};
+
+/**
+ * Verifica si es necesario hacer transcripción manual
+ * @param finalAudioKey - Clave del archivo de audio
+ * @returns - true si necesita transcripción, false si ya existe
+ */
+const checkIfTranscriptionNeeded = async (finalAudioKey: string): Promise<boolean> => {
+  try {
+    // Extraer el nombre base del archivo
+    const audioFileName = finalAudioKey.split("/").pop();
+    if (!audioFileName) return true;
+    
+    // Construir posible nombre de transcripción
+    const baseNameWithoutExt = audioFileName.replace(/\.[^/.]+$/, "");
+    
+    // Verificar si existe transcripción en S3
+    const response = await fetch(`${backendUrl}/files`);
+    if (!response.ok) return true;
+    
+    const data = await response.json();
+    if (!data.files || !Array.isArray(data.files)) return true;
+    
+    // Buscar archivo de transcripción existente
+    const transcriptionExists = data.files.some((file: any) => {
+      const fileName = file.Key.split("/").pop() || "";
+      return fileName.includes(baseNameWithoutExt) && fileName.endsWith('.txt');
+    });
+    
+    console.log(`🔍 Transcripción ${transcriptionExists ? 'encontrada' : 'no encontrada'} para ${audioFileName}`);
+    return !transcriptionExists;
+    
+  } catch (error) {
+    console.error("Error verificando transcripción:", error);
+    return true; // En caso de error, intentar transcribir
+  }
+};
+
+/**
+ * Inicia transcripción manual
+ */
+const startManualTranscription = async (
+  finalAudioKey: string,
+  fileName: string,
+  setUploadedAudios: Dispatch<SetStateAction<UploadedAudio[]>>,
+  setProcessingMessage: Dispatch<SetStateAction<string | null>>
+) => {
+  try {
+    // Actualizar estado a procesando transcripción
+    setUploadedAudios(prev => 
+      prev.map(audio => 
+        audio.name === fileName ? { ...audio, status: "Procesando" } : audio
+      )
+    );
+    
+    // Extraer solo el nombre del archivo sin la ruta
+    const fileNameKey = finalAudioKey.split("/").pop();
+    if (!fileNameKey) {
+      throw new Error("No se pudo determinar el nombre del archivo");
+    }
+    
+    // Iniciar la transcripción
+    const transcribeResponse = await fetch(
+      `${backendUrl}/transcribe/${fileNameKey}?segment_duration=60`,
+      { method: "POST" }
+    );
+    
+    if (!transcribeResponse.ok) {
+      throw new Error(`Error al obtener la transcripción: ${transcribeResponse.statusText}`);
+    }
+    
+    const transcribeData = await transcribeResponse.json();
+    setProcessingMessage("Procesando transcripción...");
+    
+    // Verificar el estado de la transcripción
+    const taskId = transcribeData.task_id;
+    await checkTranscriptionStatus(taskId, setUploadedAudios, fileName, setProcessingMessage);
+    
+  } catch (error) {
+    console.error("Error en transcripción manual:", error);
+    throw error;
+  }
+};
+
+/**
+ * Busca transcripción existente y actualiza el estado
+ */
+const findExistingTranscription = async (
+  fileName: string,
+  setUploadedAudios: Dispatch<SetStateAction<UploadedAudio[]>>
+) => {
+  try {
+    // Obtener lista de archivos actualizada
+    const response = await fetch(`${backendUrl}/files`);
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    if (!data.files || !Array.isArray(data.files)) return;
+    
+    // Extraer el ID base del nombre del archivo
+    const baseId = fileName.replace('_recording.mp3', '');
+    
+    // Buscar transcripción correspondiente
+    const transcriptionFile = data.files.find((file: any) => {
+      const key = file.Key.split("/").pop() || "";
+      return key.includes(baseId) && key.endsWith('.txt');
+    });
+    
+    if (transcriptionFile) {
+      console.log("✅ Encontrada transcripción existente:", transcriptionFile.Key);
+      setUploadedAudios(prev => 
+        prev.map(audio => 
+          audio.name === fileName 
+            ? { 
+                ...audio, 
+                status: "Completado",
+                transcriptLink: transcriptionFile.URL
+              }
+            : audio
+        )
+      );
+    }
+    
+  } catch (error) {
+    console.error("Error buscando transcripción existente:", error);
   }
 };

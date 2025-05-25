@@ -78,61 +78,82 @@ export default function MicrophoneComponent() {
   };
 
   // Función para agrupar archivos de S3 - Versión mejorada
-  const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
-    return files.reduce((acc, file) => {
-      const fileName = file.Key.split("/").pop() || "";
-      const lowerFileName = fileName.toLowerCase();
-      const lowerKey = file.Key.toLowerCase();
+// Función para agrupar archivos de S3 - Versión CORREGIDA
+const groupFiles = (files: S3File[]): Record<string, GroupedFile> => {
+  return files.reduce((acc, file) => {
+    const fileName = file.Key.split("/").pop() || "";
+    const lowerFileName = fileName.toLowerCase();
+    const lowerKey = file.Key.toLowerCase();
+    
+    // ✅ FUNCIÓN MEJORADA: Extraer el ID según el tipo de archivo
+    const extractFileId = () => {
+      // ✅ CASO 1: Archivos de transcripción con UUID (UUID_TIMESTAMP-SESSIONID_final.txt)
+      // Ejemplo: 6c782cf5-477f-435d-a257-3209bc21380c_1748209798188-vu614n_final.txt
+      const transcriptMatch = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(.+)\.txt$/i);
+      if (transcriptMatch) {
+        // Extraer la parte después del UUID: "1748209798188-vu614n_final"
+        const afterUuid = transcriptMatch[1];
+        // Si termina en "_final", quitarlo para obtener el ID base
+        return afterUuid.replace(/_final$/, '');
+      }
       
-      // Extraer el ID según el tipo de archivo
-      const extractFileId = () => {
-        // Caso 1: Archivos de audio (ID_TIMESTAMP_NOMBRE.ext)
-        const audioMatch = fileName.match(/^(\d+)_.+\.(wav|mp3|m4a|ogg|flac)$/i);
-        if (audioMatch) return audioMatch[1];
-        
-        // Caso 2: Transcripciones/Resúmenes (UUID_ID_TIMESTAMP_NOMBRE.txt)
-        const textMatch = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(\d+)_.+\.txt$/i);
-        if (textMatch) return textMatch[1];
-        
-        // Caso 3: Archivos con 'resumen' en el nombre
-        if (lowerFileName.includes('resumen')) {
-          const resumenParts = fileName.split('_resumen')[0].split('_');
-          return resumenParts[resumenParts.length - 1];
+      // ✅ CASO 2: Archivos de audio con timestamp y session (TIMESTAMP-SESSIONID_final.ext)
+      // Ejemplo: 1748209798188-vu614n_final.mp3
+      const audioMatch = fileName.match(/^(.+)_final\.(wav|mp3|m4a|ogg|flac)$/i);
+      if (audioMatch) {
+        // Extraer la parte antes de "_final": "1748209798188-vu614n"
+        return audioMatch[1];
+      }
+      
+      // ✅ CASO 3: Archivos de resumen
+      if (lowerFileName.includes('resumen')) {
+        // Buscar el patrón después del UUID o timestamp
+        const resumenMatch = fileName.match(/(?:^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_|^)(.+)_resumen/i);
+        if (resumenMatch) {
+          return resumenMatch[1].replace(/_final$/, '');
         }
-        
-        // Caso por defecto: primer segmento del nombre
-        return fileName.split('_')[0];
+      }
+      
+      // ✅ CASO 4: Archivos legacy con formato ID_TIMESTAMP_NOMBRE.ext
+      const legacyAudioMatch = fileName.match(/^(\d+)_.+\.(wav|mp3|m4a|ogg|flac)$/i);
+      if (legacyAudioMatch) return legacyAudioMatch[1];
+      
+      const legacyTextMatch = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(\d+)_.+\.txt$/i);
+      if (legacyTextMatch) return legacyTextMatch[1];
+      
+      // ✅ CASO POR DEFECTO: Usar el nombre completo sin extensión como ID
+      return fileName.replace(/\.[^/.]+$/, "");
+    };
+
+    const fileId = extractFileId();
+    
+    // Inicializar el grupo si no existe
+    if (!acc[fileId]) {
+      acc[fileId] = { 
+        audio: null, 
+        transcript: null,
+        summary: null
       };
+    }
 
-      const fileId = extractFileId();
-      
-      // Inicializar el grupo si no existe
-      if (!acc[fileId]) {
-        acc[fileId] = { 
-          audio: null, 
-          transcript: null,
-          summary: null
-        };
+    // Clasificar el archivo
+    const isAudio = /\.(wav|mp3|m4a|ogg|flac)$/i.test(fileName);
+    const isText = /\.txt$/i.test(fileName);
+    const isResume = lowerKey.includes('resume/') || lowerFileName.includes('resumen');
+
+    if (isAudio) {
+      acc[fileId].audio = file;
+    } else if (isText) {
+      if (isResume) {
+        acc[fileId].summary = file;
+      } else {
+        acc[fileId].transcript = file;
       }
+    }
 
-      // Clasificar el archivo
-      const isAudio = /\.(wav|mp3|m4a|ogg|flac)$/i.test(fileName);
-      const isText = /\.txt$/i.test(fileName);
-      const isResume = lowerKey.includes('resume/') || lowerFileName.includes('resumen');
-
-      if (isAudio) {
-        acc[fileId].audio = file;
-      } else if (isText) {
-        if (isResume) {
-          acc[fileId].summary = file;
-        } else {
-          acc[fileId].transcript = file;
-        }
-      }
-
-      return acc;
-    }, {} as Record<string, GroupedFile>);
-  };
+    return acc;
+  }, {} as Record<string, GroupedFile>);
+};
 
   // Obtener archivos de S3
   useEffect(() => {

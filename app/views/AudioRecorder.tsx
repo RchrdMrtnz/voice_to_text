@@ -1,4 +1,5 @@
-// AudioRecorderStreaming.tsx (solución mejorada con indicadores visuales)
+// AudioRecorderStreaming.tsx - MEJOR FEEDBACK VISUAL AL DETENER
+
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -18,52 +19,61 @@ interface TaskStatus {
     session_id: string;
     final_audio_key: string;
     message: string;
+    chunks_processed?: number;
+    final_duration_seconds?: number;
   } | null;
 }
 
-const backendUrl = "/api"; // Ajusta según la configuración de tu proyecto
+const backendUrl = "/api";
 
 export default function AudioRecorderStreaming({
   onRecordingStart,
   onRecordingStop,
+  onRecordingStateChange,
 }: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<string | null>(null);
-  // Nuevo estado para mostrar el autoguardado
   const [isAutoSaving, setIsAutoSaving] = useState(false);
-  const [processingStep, setProcessingStep] = useState<number>(0); // Para mostrar el progreso
+  const [processingStep, setProcessingStep] = useState<number>(0);
+  const [isProcessingStop, setIsProcessingStop] = useState(false);
+  
+  // ✅ NUEVO: Estado para mostrar duración final
+  const [finalRecordingDuration, setFinalRecordingDuration] = useState<number>(0);
   
   // Referencias para la grabación
   const mediaRecorderRef = useRef<RecordRTC | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const chunkTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Referencias para el manejo de chunks
   const sessionIdRef = useRef<string>("");
   const chunkNumberRef = useRef<number>(0);
+  const lastChunkSentTimeRef = useRef<number>(0);
   
-  // Función para formatear el tiempo de grabación
+  // ✅ EFECTO PARA NOTIFICAR CAMBIOS EN EL ESTADO DE GRABACIÓN
+  useEffect(() => {
+    onRecordingStateChange?.(isRecording);
+  }, [isRecording, onRecordingStateChange]);
+
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Función para generar un ID de sesión único
   const generateSessionId = (): string => {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   };
 
-  // Función para enviar un fragmento de audio al servidor
+  // Upload chunk con logging reducido
   const uploadChunk = async (blob: Blob, sessionId: string, chunkNumber: number): Promise<any> => {
     try {
-      // Mostrar indicador de autoguardado
+      console.log(`📤 Subiendo chunk ${chunkNumber} (${Math.round(blob.size / 1024)}KB)`);
+      
       setIsAutoSaving(true);
       
-      // Crear un nuevo File a partir del Blob
       const file = new File([blob], `chunk-${chunkNumber}.webm`, {
         type: "audio/webm",
       });
@@ -82,21 +92,19 @@ export default function AudioRecorderStreaming({
       
       const data = await response.json();
       
-      // Ocultar indicador de autoguardado después de un breve retraso
       setTimeout(() => setIsAutoSaving(false), 1000);
-      
       return data;
     } catch (error) {
-      console.error(`Error al subir fragmento ${chunkNumber}:`, error);
+      console.error(`❌ Error chunk ${chunkNumber}:`, error);
       setIsAutoSaving(false);
       throw error;
     }
   };
 
-  // Función para finalizar la grabación en el servidor
   const finishRecording = async (sessionId: string): Promise<string> => {
     try {
-      setProcessingStep(1); // Paso 1: Finalizando grabación
+      setProcessingStep(1);
+      
       const response = await fetch(`${backendUrl}/finish-recording?session_id=${sessionId}`, {
         method: "POST",
       });
@@ -106,15 +114,13 @@ export default function AudioRecorderStreaming({
       }
       
       const data = await response.json();
-      console.log("Grabación finalizada correctamente", data);
       return data.task_id;
     } catch (error) {
-      console.error("Error al finalizar la grabación:", error);
+      console.error("❌ Error al finalizar la grabación:", error);
       throw error;
     }
   };
 
-  // Función para verificar el estado de una tarea
   const checkTaskStatus = async (taskId: string): Promise<TaskStatus> => {
     try {
       const response = await fetch(`${backendUrl}/task-status/${taskId}`);
@@ -130,28 +136,25 @@ export default function AudioRecorderStreaming({
     }
   };
 
-  // Función para esperar a que una tarea finalice
   const waitForTaskCompletion = async (taskId: string): Promise<TaskStatus> => {
     let status: TaskStatus;
     let attempts = 0;
-    const maxAttempts = 30; // Máximo 1 minuto (con 2 segundos entre intentos)
+    const maxAttempts = 30;
     
     do {
-      // Esperar 2 segundos entre cada verificación
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       status = await checkTaskStatus(taskId);
       attempts++;
       
-      // Actualizar el estado de procesamiento
       if (status.status === "PROGRESS") {
         setProcessingStatus(`Procesando grabación... ${status.result?.message || ""}`);
-        setProcessingStep(2); // Paso 2: Procesando grabación
+        setProcessingStep(2);
       } else if (status.status === "SUCCESS") {
-        setProcessingStatus("Grabación completada");
-        setProcessingStep(3); // Paso 3: Completado
+        setProcessingStatus("¡Grabación completada!");
+        setProcessingStep(3);
       } else if (status.status === "FAILURE") {
-        setProcessingStatus("Error al procesar la grabación");
+        setProcessingStatus("Error al procesar");
         setProcessingStep(0);
       }
       
@@ -164,42 +167,48 @@ export default function AudioRecorderStreaming({
     return status;
   };
 
-  // Función para iniciar la grabación
   const startRecording = async () => {
     try {
-      // Generar un ID de sesión único
+      console.log("🎬 Iniciando grabación...");
+      
+      // ✅ LIMPIAR estados anteriores
+      setFinalRecordingDuration(0);
+      setProcessingStatus(null);
+      setProcessingStep(0);
+      
       sessionIdRef.current = generateSessionId();
       chunkNumberRef.current = 0;
+      lastChunkSentTimeRef.current = Date.now();
 
-      // Obtener acceso al micrófono
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       
-      // Configurar el grabador
       const recorder = new RecordRTC(stream, {
         type: "audio",
         mimeType: "audio/webm",
         recorderType: RecordRTC.StereoAudioRecorder,
         numberOfAudioChannels: 1,
         desiredSampRate: 16000,
-        timeSlice: 15000, // Capturar cada 15 segundos
-        ondataavailable: (blob) => {
-          // Esta función se llama cada timeSlice milisegundos
-          if (blob && blob.size > 0) {
+        timeSlice: 15000,
+        ondataavailable: async (blob) => {
+          if (blob && blob.size > 100) {
             const currentChunkNumber = chunkNumberRef.current++;
-            uploadChunk(blob, sessionIdRef.current, currentChunkNumber)
-              .catch(err => console.error(`Error al subir fragmento ${currentChunkNumber}:`, err));
+            lastChunkSentTimeRef.current = Date.now();
+            
+            try {
+              await uploadChunk(blob, sessionIdRef.current, currentChunkNumber);
+            } catch (err) {
+              console.error(`❌ Error al subir chunk ${currentChunkNumber}:`, err);
+            }
           }
         }
       });
 
-      // Iniciar grabación
       recorder.startRecording();
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
       onRecordingStart?.();
 
-      // Iniciar temporizador de grabación
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => prev + 1);
       }, 1000);
@@ -210,109 +219,123 @@ export default function AudioRecorderStreaming({
         duration: 2000
       });
     } catch (error) {
-      console.error("Error al iniciar grabación:", error);
+      console.error("❌ Error al iniciar grabación:", error);
       toast.error("Error al iniciar la grabación. Asegúrate de permitir el acceso al micrófono.", {
         duration: 4000
       });
     }
   };
 
-  // Función para detener la grabación
+  // ✅ FUNCIÓN MEJORADA: Mejor feedback visual
   const stopRecording = async () => {
-    if (!mediaRecorderRef.current || !streamRef.current) return;
+    if (!mediaRecorderRef.current || !streamRef.current || isProcessingStop) {
+      console.log("⚠️ Grabación ya se está procesando o no está activa");
+      return;
+    }
     
     try {
-      setIsProcessing(true);
-      setProcessingStatus("Procesando fragmentos...");
+      console.log("🛑 Deteniendo grabación...");
       
-      // Detener temporizadores
+      // ✅ CAMBIOS INMEDIATOS DE ESTADO VISUAL
+      setIsProcessingStop(true);
+      
+      // ✅ DETENER temporizador inmediatamente
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
       }
       
-      // Detener grabación y manejar el último blob
+      // ✅ GUARDAR duración final antes de cambiar estados
+      setFinalRecordingDuration(recordingDuration);
+      
+      // ✅ CAMBIAR estados visuales INMEDIATAMENTE
+      setIsRecording(false); // Ya no está grabando
+      setIsProcessing(true);  // Ahora está procesando
+      setProcessingStatus("Finalizando grabación...");
+      setProcessingStep(1);
+      
+      // ✅ FEEDBACK VISUAL CLARO: Ya no grabando, ahora procesando
+      toast.success(`Grabación detenida (${formatTime(recordingDuration)})`, {
+        icon: '⏹️',
+        position: 'bottom-center',
+        duration: 2000
+      });
+      
+      console.log(`📊 Grabación finalizada: ${chunkNumberRef.current} chunks enviados`);
+      
       mediaRecorderRef.current.stopRecording(async () => {
         try {
-          // Obtener el blob final
-          const finalBlob = mediaRecorderRef.current!.getBlob();
+          setProcessingStatus("Combinando fragmentos de audio...");
           
-          if (finalBlob && finalBlob.size > 0) {
-            // Subir el último fragmento
-            const finalChunkNumber = chunkNumberRef.current++;
-            await uploadChunk(finalBlob, sessionIdRef.current, finalChunkNumber);
-          }
+          console.log("🔧 Combinando chunks automáticos...");
           
-          // Finalizar la grabación en el servidor
-          setProcessingStatus("Combinando fragmentos...");
           const taskId = await finishRecording(sessionIdRef.current);
-          
-          // Esperar a que se complete el procesamiento
           const finalStatus = await waitForTaskCompletion(taskId);
           
           if (finalStatus.status === "SUCCESS" && finalStatus.result) {
-            toast.success("Grabación procesada correctamente", {
+            console.log("✅ Grabación procesada exitosamente");
+            
+            toast.success("¡Grabación procesada correctamente!", {
+              icon: '✅',
               duration: 3000,
             });
             
-            // Notificar que la grabación ha finalizado
-            onRecordingStop?.(
+            await onRecordingStop?.(
               finalStatus.result.session_id,
               finalStatus.result.final_audio_key
             );
           } else {
+            console.log("❌ Error al procesar la grabación");
             toast.error("Error al procesar la grabación", {
               duration: 3000,
             });
           }
         } catch (error) {
-          console.error("Error en el proceso de finalización:", error);
+          console.error("❌ Error en el proceso de finalización:", error);
           toast.error("Error al procesar la grabación", {
             duration: 3000,
           });
         } finally {
-          // Limpiar recursos
+          // ✅ LIMPIAR recursos
           if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
           }
           
-          // Mantener el estado de procesamiento completo por un momento para que el usuario lo vea
+          // ✅ TRANSICIÓN FINAL suave después de mostrar éxito
           setTimeout(() => {
-            setIsRecording(false);
             setIsProcessing(false);
+            setIsProcessingStop(false);
             setProcessingStatus(null);
             setRecordingDuration(0);
+            setFinalRecordingDuration(0);
             setProcessingStep(0);
-          }, 1500);
+          }, 2000); // 2 segundos para que el usuario vea el éxito
         }
       });
     } catch (error) {
-      console.error("Error al detener grabación:", error);
+      console.error("❌ Error al detener grabación:", error);
       toast.error("Error al detener la grabación", {
         duration: 3000,
       });
       
-      // Limpiar recursos en caso de error
+      // ✅ LIMPIAR en caso de error
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
       
       setIsRecording(false);
       setIsProcessing(false);
+      setIsProcessingStop(false);
       setProcessingStatus(null);
       setRecordingDuration(0);
+      setFinalRecordingDuration(0);
       setProcessingStep(0);
     }
   };
 
-  // Limpiar recursos al desmontar el componente
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
-      }
-      
-      if (chunkTimerRef.current) {
-        clearInterval(chunkTimerRef.current);
       }
       
       if (streamRef.current) {
@@ -321,7 +344,6 @@ export default function AudioRecorderStreaming({
     };
   }, []);
 
-  // Función para renderizar el indicador de progreso
   const renderProgressIndicator = () => {
     if (!isProcessing) return null;
     
@@ -338,7 +360,7 @@ export default function AudioRecorderStreaming({
   return (
     <div className="flex flex-col items-center justify-center">
       <div className={`relative flex flex-col items-center justify-center transition-all duration-300 ${isRecording || isProcessing ? 'scale-110' : 'scale-100'}`}>
-        {/* Círculo principal */}
+        {/* Círculo principal con estados más claros */}
         <div className={`relative flex items-center justify-center rounded-full transition-all duration-300 ${
           isRecording 
             ? 'w-28 h-28 bg-red-500 shadow-lg shadow-red-300' 
@@ -346,13 +368,13 @@ export default function AudioRecorderStreaming({
               ? 'w-28 h-28 bg-amber-500 shadow-lg shadow-amber-300'
               : 'w-24 h-24 bg-[#47CACC] hover:bg-[#3aa8a9] shadow-md hover:shadow-lg'
         }`}>
-          {/* Círculo pulsante durante grabación */}
-          {isRecording && (
+          {/* Círculo pulsante SOLO durante grabación activa */}
+          {isRecording && !isProcessing && (
             <div className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-50"></div>
           )}
           
-          {/* Indicador de autoguardado */}
-          {isRecording && isAutoSaving && (
+          {/* Indicador de autoguardado SOLO durante grabación */}
+          {isRecording && !isProcessing && isAutoSaving && (
             <div className="absolute -top-2 -right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full z-20 animate-pulse">
               Guardando...
             </div>
@@ -380,23 +402,37 @@ export default function AudioRecorderStreaming({
           </button>
         </div>
 
-        {/* Estado actual */}
+        {/* ✅ ESTADOS VISUALES MEJORADOS - Sin solapamiento */}
         {(isRecording || isProcessing || processingStatus) && (
           <div className="mt-6 min-w-[200px]">
-            {isRecording && (
+            {/* ✅ MOSTRAR contador SOLO durante grabación activa */}
+            {isRecording && !isProcessing && (
               <div className="flex items-center justify-center bg-red-100 text-red-700 font-medium px-4 py-1.5 rounded-full">
                 <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse mr-2"></div>
                 <span className="text-sm">
-                  {formatTime(recordingDuration)}
+                  Grabando {formatTime(recordingDuration)}
                   {isAutoSaving && (
-                    <span className="ml-2 text-green-600 text-xs">• Autoguardado</span>
+                    <span className="ml-2 text-green-600 text-xs">• Guardando</span>
                   )}
                 </span>
               </div>
             )}
             
-            {isProcessing && processingStatus && (
+            {/* ✅ MOSTRAR procesamiento SOLO cuando no está grabando */}
+            {!isRecording && isProcessing && processingStatus && (
               <div className="flex flex-col items-center space-y-2 w-full">
+                {/* ✅ MOSTRAR duración final al comenzar procesamiento */}
+                {finalRecordingDuration > 0 && processingStep === 1 && (
+                  <div className="flex items-center justify-center bg-green-100 text-green-700 font-medium px-4 py-1.5 rounded-full mb-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-sm">
+                      Grabado: {formatTime(finalRecordingDuration)}
+                    </span>
+                  </div>
+                )}
+                
                 <div className="flex items-center justify-center bg-amber-100 text-amber-700 font-medium px-4 py-1.5 rounded-full w-full">
                   <div className="w-2 h-2 bg-amber-600 rounded-full animate-pulse mr-2"></div>
                   <span className="text-sm">{processingStatus}</span>
@@ -408,9 +444,9 @@ export default function AudioRecorderStreaming({
         )}
       </div>
       
-      {/* Texto de instrucción */}
+      {/* ✅ TEXTO de instrucción más claro */}
       <p className={`mt-4 text-sm text-gray-600 transition-opacity duration-300 ${isRecording || isProcessing ? 'opacity-0' : 'opacity-100'}`}>
-        Presiona el botón para {isRecording ? "detener" : "iniciar"} la grabación
+        {isProcessing ? '' : `Presiona el botón para ${isRecording ? "detener" : "iniciar"} la grabación`}
       </p>
     </div>
   );
